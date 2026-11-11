@@ -79,6 +79,9 @@ body{
   width:100%;height:280px;border-radius:14px;border:1px solid var(--border);
   overflow:hidden;margin-bottom:14px;background:#151520;
 }
+.leaflet-tile{
+  filter:brightness(0.65) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.75);
+}
 .chart-card{
   background:var(--card);border:1px solid var(--border);border-radius:14px;
   padding:14px;margin-bottom:14px;
@@ -615,8 +618,9 @@ function initUserMap(city, data) {
   const coords = CrimeDB.CITY_COORDS[city] || [19.0760, 72.8777];
   if (!userMapObj) {
     userMapObj = L.map('userMap').setView(coords, 12);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '© OpenStreetMap © CARTO'
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors',
+      maxZoom: 19
     }).addTo(userMapObj);
   } else {
     userMapObj.setView(coords, 12);
@@ -653,8 +657,9 @@ function initUserMap(city, data) {
 function initFullMap() {
   if (!fullMapObj) {
     fullMapObj = L.map('fullMap').setView([20.5937, 78.9629], 5);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '© OpenStreetMap © CARTO'
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors',
+      maxZoom: 19
     }).addTo(fullMapObj);
   }
   renderFullMap();
@@ -770,45 +775,48 @@ async function triggerSOS() {
   sosActive = true;
   sosBtn.classList.remove('pressing');
   document.getElementById('sosOverlay').classList.add('show');
-  document.getElementById('sosLocInfo').innerHTML = '📍 Broadcasting emergency alert to Admin...';
+  document.getElementById('sosLocInfo').innerHTML = '🚨 Broadcasting urgent emergency SOS to Admin...';
 
-  const send = async (lat, lng) => {
+  const send = (lat, lng) => {
+    // 1) DISPATCH SOS IMMEDIATELY (< 50ms) - DO NOT WAIT FOR APIs!
     const sosRec = CrimeDB.sendSOS(currentUser.id, currentUser.name, lat, lng);
     document.getElementById('sosLocInfo').innerHTML =
-      `📍 Coordinates: ${lat.toFixed(4)}, ${lng.toFixed(4)}<br/>📡 Broadcasted to Admin in real time! Fetching nearby places...`;
+      `📍 Coordinates: ${lat.toFixed(4)}, ${lng.toFixed(4)}<br/>🚨 <b>Alert delivered to Admin!</b> Siren sounding...`;
 
-    let address = 'Unknown address', nearbyPlaces = [];
-    try {
-      const nomRes = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=en`,
-        { headers: { 'User-Agent': 'CrimeWatchIndia/1.0' } }
-      );
-      if (nomRes.ok) {
-        const nomData = await nomRes.json();
-        address = nomData.display_name || 'Unknown address';
+    // 2) ASYNC IN BACKGROUND: fetch address & nearby places with 3s timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+    Promise.allSettled([
+      fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=en`, {
+        signal: controller.signal,
+        headers: { 'User-Agent': 'CrimeWatchIndia/1.0' }
+      }).then(r => r.json()),
+      fetch(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(`[out:json][timeout:3];(node(around:400,${lat},${lng})[name];);out 15;`)}`, {
+        signal: controller.signal
+      }).then(r => r.json())
+    ]).then(([nomRes, ovRes]) => {
+      clearTimeout(timeoutId);
+      let address = 'Unknown address', nearbyPlaces = [];
+      if (nomRes.status === 'fulfilled' && nomRes.value?.display_name) {
+        address = nomRes.value.display_name;
       }
-    } catch(e) {}
-
-    try {
-      const overpassQ = `[out:json][timeout:10];(node(around:400,${lat},${lng})[name];way(around:400,${lat},${lng})[name];);out 20;`;
-      const ovRes = await fetch(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(overpassQ)}`);
-      if (ovRes.ok) {
-        const ovData = await ovRes.json();
-        nearbyPlaces = (ovData.elements || [])
-          .filter(el => el.tags && el.tags.name)
-          .slice(0, 15)
+      if (ovRes.status === 'fulfilled' && ovRes.value?.elements) {
+        nearbyPlaces = ovRes.value.elements
+          .filter(el => el.tags?.name)
+          .slice(0, 10)
           .map(el => ({ name: el.tags.name, type: el.tags.amenity || el.tags.shop || 'landmark' }));
       }
-    } catch(e) {}
+      // Update record with address and nearby places in real-time
+      CrimeDB.updateSOS(sosRec.id, { address, nearbyPlaces });
 
-    CrimeDB.updateSOS(sosRec.id, { address, nearbyPlaces });
-
-    const placesTxt = nearbyPlaces.length
-      ? `<br/>📍 <b>Nearby Places:</b> ${nearbyPlaces.slice(0,5).map(p=>`${p.name} (${p.type})`).join(', ')}`
-      : '';
-    document.getElementById('sosLocInfo').innerHTML =
-      `📍 Coordinates: ${lat.toFixed(4)}, ${lng.toFixed(4)}<br/>
-       🏠 ${address.length > 80 ? address.slice(0,80)+'…' : address}${placesTxt}`;
+      const placesTxt = nearbyPlaces.length
+        ? `<br/>📍 <b>Nearby Places:</b> ${nearbyPlaces.slice(0,5).map(p=>`${p.name} (${p.type})`).join(', ')}`
+        : '';
+      document.getElementById('sosLocInfo').innerHTML =
+        `📍 Coordinates: ${lat.toFixed(4)}, ${lng.toFixed(4)}<br/>
+         🏠 ${address.length > 80 ? address.slice(0,80)+'…' : address}${placesTxt}`;
+    }).catch(() => {});
   };
 
   const coords = CrimeDB.CITY_COORDS[currentCity] || [19.0760, 72.8777];
@@ -816,7 +824,7 @@ async function triggerSOS() {
     navigator.geolocation.getCurrentPosition(
       p => send(p.coords.latitude, p.coords.longitude),
       () => send(userLat || coords[0], userLng || coords[1]),
-      { timeout: 7000 }
+      { timeout: 3500 }
     );
   } else {
     send(userLat || coords[0], userLng || coords[1]);

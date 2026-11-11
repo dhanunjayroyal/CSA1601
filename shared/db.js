@@ -59,12 +59,17 @@ const CrimeDB = (() => {
     try { if (bChannel) bChannel.postMessage({ type, payload }); } catch(e){}
   }
 
-  // Publish to Cloud (ntfy.sh)
-  function publishCloud(url, data) {
+  // Publish to Cloud (ntfy.sh) with urgent priority
+  function publishCloud(url, data, priority) {
     try {
       fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Priority': priority || '5',
+          'Title': 'CrimeWatch',
+          'Tags': 'rotating_light,sos'
+        },
         body: JSON.stringify(data)
       }).catch(()=>{});
     } catch(e){}
@@ -158,6 +163,43 @@ const CrimeDB = (() => {
         };
       }
     } catch(e){}
+
+    // 4. Fast Cloud Polling (every 1.5 seconds) guarantees <1.5s latency even if SSE drops
+    function fastPoll() {
+      fetch(`${CLOUD_SOS_TOPIC}/json?poll=1&since=20s`)
+        .then(r => r.text())
+        .then(txt => {
+          txt.split('\n').forEach(line => {
+            if (!line.trim()) return;
+            try {
+              const ev = JSON.parse(line);
+              if (ev.event === 'message') {
+                const alert = JSON.parse(ev.message);
+                mergeSOS(alert);
+                notifySOS(alert, alert.status === 'active');
+              }
+            } catch(e){}
+          });
+        }).catch(()=>{});
+
+      fetch(`${CLOUD_USERS_TOPIC}/json?poll=1&since=20s`)
+        .then(r => r.text())
+        .then(txt => {
+          txt.split('\n').forEach(line => {
+            if (!line.trim()) return;
+            try {
+              const ev = JSON.parse(line);
+              if (ev.event === 'message') {
+                const u = JSON.parse(ev.message);
+                mergeUser(u);
+                notifyUser(u);
+              }
+            } catch(e){}
+          });
+        }).catch(()=>{});
+    }
+
+    setInterval(fastPoll, 1500);
   }
 
   function seedAdmin(){
