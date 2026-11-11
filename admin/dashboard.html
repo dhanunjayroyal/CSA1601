@@ -810,6 +810,9 @@ function checkNewSOS() {
   }
   lastSOSCount = active;
   updateSOSBadge(active);
+  if (document.getElementById('page-sos')?.classList.contains('active')) {
+    renderSOS();
+  }
 }
 
 function updateSOSBadge(active) {
@@ -1080,8 +1083,35 @@ function doLogout() { CrimeDB.clearSession('admin'); window.location.href = 'log
 // ── Init ──────────────────────────────────────────────────
 setTimeout(initDashboard, 300);
 
-// Poll for new SOS every 8 seconds
-setInterval(checkNewSOS, 8000);
+// Realtime cross-device cloud listener for instant SOS and Users
+CrimeDB.onSOS((alert, isNew) => {
+  if (isNew) {
+    try { playSOSAlarm(); } catch(e) {}
+    showSOSAlarm();
+    const pill = document.getElementById('sosPill');
+    if (pill) {
+      pill.classList.add('ringing');
+      setTimeout(() => pill.classList.remove('ringing'), 5000);
+    }
+  }
+  const sos = CrimeDB.getSOSAlerts();
+  const active = sos.filter(s => s.status === 'active').length;
+  lastSOSCount = active;
+  updateSOSBadge(active);
+  renderSOS();
+});
+
+CrimeDB.onUser(u => {
+  renderUsers();
+  const users = CrimeDB.getAllUsers();
+  const hU = document.getElementById('hUsers');
+  if (hU) hU.textContent = users.length + ' Users';
+  const uc = document.getElementById('userCount');
+  if (uc) uc.textContent = users.length + ' users';
+});
+
+// Poll for new SOS every 5 seconds as fallback
+setInterval(checkNewSOS, 5000);
 
 // Resume audio context on first user interaction (browser policy)
 document.addEventListener('click', () => {

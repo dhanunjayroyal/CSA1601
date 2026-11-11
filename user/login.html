@@ -85,7 +85,8 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--dark);color:va
         <div class="iw"><span class="ic">📧</span><input type="email" id="r_em" placeholder="your@email.com"/></div></div>
       <div class="fg"><label>Phone</label>
         <div class="iw"><span class="ic">📱</span><input type="tel" id="r_ph" placeholder="+91 XXXXX XXXXX"/></div></div>
-      <div class="note">🔐 Default password: <b style="color:#00b894">&nbsp;Welcome@123</b> — you'll change it on first login.</div>
+      <div class="fg"><label>Create Password * (min 8 characters)</label>
+        <div class="iw"><span class="ic">🔑</span><input type="password" id="r_pw" placeholder="e.g. Pass@1234 (or leave blank for Welcome@123)"/></div></div>
       <button class="btn-main" onclick="doRegister()">✅ Create Account</button>
       <div class="err" id="r_err"></div>
     </div>
@@ -131,15 +132,42 @@ function doLogin(){
   CrimeDB.setSession('user',u);window.location.href='home.html';
 }
 function doRegister(){
-  const name=document.getElementById('r_name').value.trim();
-  const em=document.getElementById('r_em').value.trim();
-  const ph=document.getElementById('r_ph').value.trim();
-  const err=document.getElementById('r_err');
-  err.style.display='none';
-  if(!name||!em){err.textContent='⚠️ Name and email are required.';err.style.display='block';return;}
-  const res=CrimeDB.registerUser(name,em,ph);
-  if(res.error){err.textContent='⚠️ '+res.error;err.style.display='block';return;}
-  pendingUser=res.user;document.getElementById('cpModal').classList.add('show');
+  const name = document.getElementById('r_name').value.trim();
+  const em   = document.getElementById('r_em').value.trim();
+  const ph   = document.getElementById('r_ph').value.trim();
+  const pw   = document.getElementById('r_pw').value;
+  const err  = document.getElementById('r_err');
+  err.style.display = 'none';
+
+  if (!name || !em) {
+    err.textContent = '⚠️ Name and email are required.';
+    err.style.display = 'block';
+    return;
+  }
+
+  if (pw && pw.length < 8) {
+    err.textContent = '⚠️ Password must be at least 8 characters.';
+    err.style.display = 'block';
+    return;
+  }
+
+  const res = CrimeDB.registerUser(name, em, ph, pw || 'Welcome@123');
+  if (res.error) {
+    err.textContent = '⚠️ ' + res.error;
+    err.style.display = 'block';
+    return;
+  }
+
+  // If user entered their own password >= 8 chars, log them in directly!
+  if (pw && pw.length >= 8) {
+    res.user.mustChange = false;
+    CrimeDB.setSession('user', res.user);
+    window.location.href = 'home.html';
+    return;
+  }
+
+  pendingUser = res.user;
+  document.getElementById('cpModal').classList.add('show');
 }
 function chkStr(pw){
   let s=0;if(pw.length>=8)s++;if(/[A-Z]/.test(pw))s++;if(/[0-9]/.test(pw))s++;if(/[^A-Za-z0-9]/.test(pw))s++;
@@ -157,7 +185,17 @@ function doChangePw(){
   pendingUser.password=np;pendingUser.mustChange=false;
   CrimeDB.setSession('user',pendingUser);window.location.href='home.html';
 }
-document.addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    if (document.getElementById('cpModal').classList.contains('show')) {
+      doChangePw();
+    } else if (document.getElementById('f-reg').style.display === 'block') {
+      doRegister();
+    } else {
+      doLogin();
+    }
+  }
+});
 </script>
 </body>
 </html>

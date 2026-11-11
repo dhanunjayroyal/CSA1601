@@ -316,6 +316,10 @@ tr:hover td{background:rgba(255,255,255,.02);}
   <div class="page" id="page-emergency">
     <div class="section-title">ðŸ†˜ Emergency Services</div>
 
+    <button onclick="triggerSOS()" style="width:100%;margin-bottom:16px;padding:14px;background:linear-gradient(135deg,#c0392b,#e74c3c);border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;box-shadow:0 6px 20px rgba(231,76,60,.4);display:flex;align-items:center;justify-content:center;gap:10px;">
+      🚨 INSTANT 1-TAP SOS ALERT TO ADMIN
+    </button>
+
     <div class="quick-dial">
       <a href="tel:100" class="dial-btn">
         <div style="font-size:24px;">ðŸš“</div>
@@ -816,20 +820,19 @@ async function triggerSOS() {
   sosActive = true;
   sosBtn.classList.remove('pressing');
   document.getElementById('sosOverlay').classList.add('show');
-  document.getElementById('sosLocInfo').innerHTML = 'ðŸ“ Locating you & gathering nearby places...';
+  document.getElementById('sosLocInfo').innerHTML = '📍 Locating you & broadcasting to Admin...';
 
   const send = async (lat, lng) => {
-    // 1) Save basic SOS first so admin sees it immediately
+    // 1) Save and broadcast SOS to Admin & Cloud immediately
     const sosRec = CrimeDB.sendSOS(currentUser.id, currentUser.name, lat, lng);
     document.getElementById('sosLocInfo').innerHTML =
-      `ðŸ“ Lat: ${lat.toFixed(5)}, Lng: ${lng.toFixed(5)}<br/>â³ Fetching nearby places...`;
+      📍 Coordinates: , <br/>📡 Alert delivered to Admin in real time! Fetching nearby places...;
 
     // 2) Try to get reverse geocode address + nearby places
     let address = 'Unknown address', nearbyPlaces = [];
     try {
-      // Nominatim reverse geocoding
       const nomRes = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=en`,
+        https://nominatim.openstreetmap.org/reverse?format=json&lat=&lon=&accept-language=en,
         { headers: { 'User-Agent': 'CrimeWatchIndia/1.0' } }
       );
       if (nomRes.ok) {
@@ -839,10 +842,9 @@ async function triggerSOS() {
     } catch(e) {}
 
     try {
-      // Overpass API: nearby named places within 400m
-      const overpassQ = `[out:json][timeout:10];(node(around:400,${lat},${lng})[name];way(around:400,${lat},${lng})[name];);out 20;`;
+      const overpassQ = [out:json][timeout:10];(node(around:400,,)[name];way(around:400,,)[name];);out 20;;
       const ovRes = await fetch(
-        `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(overpassQ)}`
+        https://overpass-api.de/api/interpreter?data=
       );
       if (ovRes.ok) {
         const ovData = await ovRes.json();
@@ -857,32 +859,27 @@ async function triggerSOS() {
       }
     } catch(e) {}
 
-    // 3) Update the SOS record with address + nearby places
-    const sos = JSON.parse(localStorage.getItem('cw_sos_alerts') || '[]');
-    const idx = sos.findIndex(s => s.id === sosRec.id);
-    if (idx !== -1) {
-      sos[idx].address = address;
-      sos[idx].nearbyPlaces = nearbyPlaces;
-      try { localStorage.setItem('cw_sos_alerts', JSON.stringify(sos)); } catch(e) {}
-    }
+    // 3) Update the SOS record with address + nearby places & broadcast update
+    CrimeDB.updateSOS(sosRec.id, { address, nearbyPlaces });
 
     // 4) Update overlay display
     const placesTxt = nearbyPlaces.length
-      ? `<br/>ðŸ“ <b>Nearby:</b> ${nearbyPlaces.slice(0,5).map(p=>`${p.name} (${p.type})`).join(', ')}`
+      ? <br/>📍 <b>Nearby Places:</b> 
       : '';
     document.getElementById('sosLocInfo').innerHTML =
-      `ðŸ“ Lat: ${lat.toFixed(5)}, Lng: ${lng.toFixed(5)}<br/>
-       ðŸ  ${address.length > 80 ? address.slice(0,80)+'â€¦' : address}${placesTxt}`;
+      📍 Coordinates: , <br/>
+       🏠 ;
   };
 
+  const fallbackCoords = CrimeDB.CITY_COORDS[currentCity] || [19.0760, 72.8777];
   if (navigator.geolocation) {
     navigator.geolocation.getCurrentPosition(
       p => send(p.coords.latitude, p.coords.longitude),
-      () => send(userLat || 0, userLng || 0),
+      () => send(userLat || fallbackCoords[0], userLng || fallbackCoords[1]),
       { timeout: 8000 }
     );
   } else {
-    send(userLat || 0, userLng || 0);
+    send(userLat || fallbackCoords[0], userLng || fallbackCoords[1]);
   }
 }
 
