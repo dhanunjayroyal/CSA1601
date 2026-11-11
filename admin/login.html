@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>CrimeWatch – Admin Login</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--dark:#0d1117;--card:#21262d;--surface:#161b22;--text:#e6edf3;--muted:#8b949e;--border:#30363d;}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--dark);color:var(--text);
+  min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;
+  background-image:radial-gradient(ellipse at 20% 50%,rgba(26,35,126,.3) 0%,transparent 50%),
+    radial-gradient(ellipse at 80% 20%,rgba(198,40,40,.2) 0%,transparent 40%);}
+.wrap{width:100%;max-width:420px;}
+.brand{text-align:center;margin-bottom:28px;}
+.brand-logo{width:68px;height:68px;background:linear-gradient(135deg,#1a237e,#c62828);
+  border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:30px;
+  margin:0 auto 12px;box-shadow:0 0 40px rgba(198,40,40,.3);}
+.brand h1{font-size:24px;font-weight:700;}
+.brand h1 span{color:#c62828;}
+.brand p{color:var(--muted);font-size:13px;margin-top:4px;}
+.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:28px;
+  box-shadow:0 20px 50px rgba(0,0,0,.5);}
+.card-head{display:flex;align-items:center;gap:10px;margin-bottom:24px;
+  padding-bottom:18px;border-bottom:1px solid var(--border);}
+.badge{background:linear-gradient(135deg,#1a237e,#283593);color:#fff;font-size:10px;
+  font-weight:700;padding:4px 10px;border-radius:20px;letter-spacing:1px;}
+.card-head h2{font-size:17px;font-weight:600;}
+.fg{margin-bottom:16px;}
+.fg label{display:block;font-size:10px;font-weight:600;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px;}
+.iw{position:relative;}
+.iw input{width:100%;background:var(--surface);border:1px solid var(--border);color:var(--text);
+  border-radius:9px;padding:12px 44px 12px 42px;font-size:14px;outline:none;transition:border-color .2s;}
+.iw input:focus{border-color:#1a237e;box-shadow:0 0 0 3px rgba(26,35,126,.2);}
+.iw .ic{position:absolute;left:13px;top:50%;transform:translateY(-50%);font-size:15px;}
+.iw .tpw{position:absolute;right:13px;top:50%;transform:translateY(-50%);
+  background:none;border:none;color:var(--muted);cursor:pointer;font-size:15px;}
+.btn-main{width:100%;padding:13px;font-size:14px;font-weight:600;
+  background:linear-gradient(135deg,#1a237e,#c62828);color:#fff;border:none;
+  border-radius:10px;cursor:pointer;transition:all .2s;box-shadow:0 4px 18px rgba(198,40,40,.3);}
+.btn-main:hover{opacity:.9;transform:translateY(-1px);}
+.err{background:rgba(198,40,40,.1);border:1px solid rgba(198,40,40,.3);color:#ff6b6b;
+  border-radius:8px;padding:10px 12px;font-size:12px;margin-top:10px;display:none;}
+.sec-note{display:flex;align-items:center;gap:8px;background:rgba(26,35,126,.1);
+  border:1px solid rgba(26,35,126,.2);border-radius:8px;padding:10px 12px;
+  margin-top:14px;font-size:12px;color:var(--muted);}
+.user-link{text-align:center;margin-top:18px;font-size:13px;color:var(--muted);}
+.user-link a{color:#f9a825;text-decoration:none;font-weight:500;}
+/* Modal */
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:100;
+  align-items:center;justify-content:center;padding:20px;}
+.overlay.show{display:flex;}
+.modal{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:26px;width:100%;max-width:380px;}
+.modal h3{font-size:17px;font-weight:600;margin-bottom:6px;}
+.modal p{font-size:13px;color:var(--muted);margin-bottom:18px;}
+.pw-bar-wrap{height:3px;background:var(--border);border-radius:2px;margin-top:5px;overflow:hidden;}
+.pw-bar{height:100%;border-radius:2px;transition:all .3s;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">
+    <div class="brand-logo">🛡️</div>
+    <h1>CrimeWatch <span>India</span></h1>
+    <p>Crime Intelligence &amp; Safety Platform</p>
+  </div>
+  <div class="card">
+    <div class="card-head"><span class="badge">ADMIN</span><h2>Administrator Login</h2></div>
+    <div class="fg"><label>Email Address</label>
+      <div class="iw"><span class="ic">📧</span>
+        <input type="email" id="em" placeholder="admin@crimewatch.in" value="admin@crimewatch.in"/></div></div>
+    <div class="fg"><label>Password</label>
+      <div class="iw"><span class="ic">🔑</span>
+        <input type="password" id="pw" placeholder="Password"/>
+        <button class="tpw" onclick="togglePw()">👁️</button></div></div>
+    <button class="btn-main" onclick="doLogin()">🔐 Sign In to Admin Panel</button>
+    <div class="err" id="err"></div>
+    <div class="sec-note">🔒 Restricted to authorized administrators. All access is logged.</div>
+  </div>
+  <div class="user-link">User? <a href="../user/login.html">User Portal →</a></div>
+</div>
+
+<!-- Change PW Modal -->
+<div class="overlay" id="cpModal">
+  <div class="modal">
+    <h3>🔐 Change Your Password</h3>
+    <p>For security, please set a new password. Minimum 8 characters.</p>
+    <div class="fg"><label>New Password</label>
+      <div class="iw"><span class="ic">🔑</span>
+        <input type="password" id="np" placeholder="New password" oninput="chkStr(this.value)"/></div>
+      <div class="pw-bar-wrap"><div class="pw-bar" id="pwb"></div></div></div>
+    <div class="fg"><label>Confirm Password</label>
+      <div class="iw"><span class="ic">🔑</span><input type="password" id="cp" placeholder="Confirm"/></div></div>
+    <button class="btn-main" onclick="doChangePw()">Update Password &amp; Continue</button>
+    <div class="err" id="cp_err" style="display:none;margin-top:10px;"></div>
+  </div>
+</div>
+
+<script src="../shared/crime-data-inline.js"></script>
+<script src="../shared/db.js"></script>
+<script>
+let pendingAdmin=null;
+function togglePw(){const i=document.getElementById('pw');i.type=i.type==='password'?'text':'password';}
+function doLogin(){
+  const em=document.getElementById('em').value.trim();
+  const pw=document.getElementById('pw').value;
+  const err=document.getElementById('err');
+  err.style.display='none';
+  if(!em||!pw){err.textContent='⚠️ Please fill in all fields.';err.style.display='block';return;}
+  const a=CrimeDB.loginAdmin(em,pw);
+  if(!a){err.textContent='⚠️ Invalid email or password.';err.style.display='block';return;}
+  if(a.mustChange){pendingAdmin=a;document.getElementById('cpModal').classList.add('show');return;}
+  CrimeDB.setSession('admin',a);window.location.href='dashboard.html';
+}
+function chkStr(pw){
+  let s=0;if(pw.length>=8)s++;if(/[A-Z]/.test(pw))s++;if(/[0-9]/.test(pw))s++;if(/[^A-Za-z0-9]/.test(pw))s++;
+  const b=document.getElementById('pwb');
+  b.style.width=(s*25)+'%';b.style.background=['#e74c3c','#f39c12','#27ae60','#1abc9c'][s-1]||'#30363d';
+}
+function doChangePw(){
+  const np=document.getElementById('np').value;
+  const cp=document.getElementById('cp').value;
+  const err=document.getElementById('cp_err');
+  err.style.display='none';
+  if(np.length<8){err.textContent='Minimum 8 characters required.';err.style.display='block';return;}
+  if(np!==cp){err.textContent='Passwords do not match.';err.style.display='block';return;}
+  CrimeDB.changeAdminPassword(pendingAdmin.id,np);
+  pendingAdmin.password=np;pendingAdmin.mustChange=false;
+  CrimeDB.setSession('admin',pendingAdmin);window.location.href='dashboard.html';
+}
+document.addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
+</script>
+</body>
+</html>

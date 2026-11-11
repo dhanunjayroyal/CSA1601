@@ -1,0 +1,1240 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>CrimeWatch India â€“ Safety Dashboard</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>ðŸ›¡ï¸</text></svg>"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+:root{
+  --primary:#0a3d62;--accent:#e84393;--teal:#00b894;
+  --warn:#f39c12;--danger:#e74c3c;
+  --dark:#0a0a0f;--surface:#12121a;--card:#1a1a26;
+  --text:#f0f0f8;--muted:#9090b0;--border:#2a2a3d;
+  --nav-h:68px;
+}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--dark);color:var(--text);
+  display:flex;flex-direction:column;min-height:100vh;padding-bottom:var(--nav-h);}
+
+/* â”€â”€ Top Bar â”€â”€ */
+.topbar{background:var(--surface);border-bottom:1px solid var(--border);
+  padding:0 16px;height:54px;display:flex;align-items:center;gap:10px;
+  position:sticky;top:0;z-index:100;}
+.topbar-logo{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:700;}
+.logo-icon{width:30px;height:30px;background:linear-gradient(135deg,var(--primary),var(--accent));
+  border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;}
+.topbar-greeting{flex:1;text-align:center;font-size:13px;color:var(--muted);}
+.topbar-greeting b{color:var(--text);}
+.icon-btn{width:34px;height:34px;border-radius:9px;border:1px solid var(--border);
+  background:var(--card);display:flex;align-items:center;justify-content:center;
+  font-size:15px;cursor:pointer;transition:all .2s;}
+.icon-btn:hover{border-color:var(--accent);}
+
+/* â”€â”€ Pages â”€â”€ */
+.content{flex:1;overflow-y:auto;}
+.page{display:none;padding:14px;}
+.page.active{display:block;}
+
+/* â”€â”€ Bottom Nav â”€â”€ */
+.bottom-nav{position:fixed;bottom:0;left:0;right:0;height:var(--nav-h);
+  background:var(--surface);border-top:1px solid var(--border);
+  display:flex;align-items:center;z-index:100;}
+.nav-tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:2px;cursor:pointer;color:var(--muted);font-size:10px;font-weight:500;
+  border:none;background:none;padding:6px 0;transition:color .2s;}
+.nav-tab .ni{font-size:20px;line-height:1;}
+.nav-tab.active{color:var(--accent);}
+
+/* â”€â”€ SOS Button â”€â”€ */
+.sos-center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;}
+.sos-wrap{position:relative;width:62px;height:62px;display:flex;align-items:center;justify-content:center;}
+.sos-ring{position:absolute;inset:0;border-radius:50%;border:2px solid rgba(231,76,60,.35);animation:ring 1.8s ease-out infinite;}
+@keyframes ring{0%{transform:scale(1);opacity:1}100%{transform:scale(1.7);opacity:0}}
+.sos-btn{
+  width:58px;height:58px;border-radius:50%;
+  background:linear-gradient(145deg,#c0392b,#e74c3c);
+  border:3px solid var(--dark);
+  display:flex;align-items:center;justify-content:center;
+  font-size:22px;cursor:pointer;
+  box-shadow:0 4px 18px rgba(231,76,60,.55);
+  transition:transform .1s,box-shadow .1s;
+  position:relative;z-index:2;
+  user-select:none;-webkit-user-select:none;touch-action:none;
+}
+.sos-btn.pressing{transform:scale(.9);box-shadow:0 2px 8px rgba(231,76,60,.4);}
+/* SVG progress ring around SOS */
+.sos-svg{position:absolute;inset:-5px;z-index:3;pointer-events:none;}
+.sos-svg circle{fill:none;stroke:#ff4444;stroke-width:4;
+  stroke-dasharray:214;stroke-dashoffset:214;
+  stroke-linecap:round;transition:stroke-dashoffset .1s linear;
+  transform-origin:center;transform:rotate(-90deg);}
+.sos-label{font-size:9px;color:#e74c3c;font-weight:700;letter-spacing:.5px;margin-top:2px;}
+
+/* â”€â”€ SOS Overlay â”€â”€ */
+.sos-overlay{display:none;position:fixed;inset:0;z-index:500;
+  background:linear-gradient(135deg,#8b0000,#c0392b);
+  flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;gap:16px;padding:30px;}
+.sos-overlay.show{display:flex;}
+.sos-big{font-size:72px;animation:pulse 1s infinite;}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}
+.sos-overlay h2{font-size:26px;font-weight:800;color:#fff;}
+.sos-overlay p{font-size:15px;color:rgba(255,255,255,.85);line-height:1.5;}
+.sos-info{background:rgba(255,255,255,.12);border-radius:12px;padding:12px 20px;font-size:13px;color:#fff;}
+.btn-cancel{background:rgba(255,255,255,.2);border:2px solid rgba(255,255,255,.5);
+  color:#fff;border-radius:12px;padding:14px 36px;font-size:16px;font-weight:700;
+  cursor:pointer;margin-top:8px;transition:all .2s;}
+.btn-cancel:hover{background:rgba(255,255,255,.3);}
+
+/* â”€â”€ Cards & Layout â”€â”€ */
+.safety-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px;margin-bottom:14px;}
+.section-title{font-size:14px;font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:7px;}
+
+/* Safety score */
+.score-row{display:flex;align-items:center;gap:14px;margin-bottom:10px;}
+.score-num{font-size:50px;font-weight:800;line-height:1;}
+.gauge{width:100%;height:8px;background:var(--border);border-radius:4px;overflow:hidden;margin:8px 0;}
+.gauge-fill{height:100%;border-radius:4px;transition:width .8s,background .8s;}
+.risk-badge{display:inline-flex;align-items:center;gap:6px;border-radius:10px;
+  padding:6px 14px;font-size:13px;font-weight:700;}
+
+/* Mini stats */
+.mini-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px;}
+.mini-stat{background:var(--card);border:1px solid var(--border);border-radius:11px;
+  padding:12px 8px;text-align:center;}
+.mini-stat .val{font-size:20px;font-weight:700;}
+.mini-stat .lbl{font-size:10px;color:var(--muted);margin-top:3px;}
+
+/* Location search */
+.loc-search{background:var(--card);border:1px solid var(--border);border-radius:11px;
+  padding:12px 14px;margin-bottom:14px;display:flex;gap:10px;align-items:center;}
+.loc-search input{flex:1;background:none;border:none;color:var(--text);font-size:14px;outline:none;}
+.loc-search input::placeholder{color:var(--muted);}
+.btn-loc{background:linear-gradient(135deg,var(--primary),var(--accent));
+  border:none;border-radius:8px;color:#fff;padding:8px 12px;cursor:pointer;
+  font-size:12px;font-weight:600;white-space:nowrap;}
+
+/* Map */
+#userMap{height:300px;border-radius:12px;overflow:hidden;margin-bottom:14px;border:1px solid var(--border);}
+#fullMap{height:calc(100vh - 210px);border-radius:12px;overflow:hidden;border:1px solid var(--border);}
+
+/* Alert banner */
+.alert-banner{border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:13px;line-height:1.5;}
+.alert-safe{background:rgba(0,184,148,.1);border:1px solid rgba(0,184,148,.3);color:#00b894;}
+.alert-warn{background:rgba(243,156,18,.1);border:1px solid rgba(243,156,18,.3);color:#f39c12;}
+.alert-danger{background:rgba(231,76,60,.1);border:1px solid rgba(231,76,60,.3);color:#e74c3c;}
+
+/* Chart */
+.chart-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px;}
+.chart-title{font-size:13px;font-weight:600;margin-bottom:10px;}
+canvas{max-width:100%;}
+
+/* Table */
+.table-wrap{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:14px;}
+table{width:100%;border-collapse:collapse;font-size:12px;}
+th{background:var(--surface);color:var(--muted);font-size:10px;font-weight:600;
+  text-transform:uppercase;letter-spacing:.6px;padding:9px 12px;text-align:left;}
+td{padding:10px 12px;border-bottom:1px solid rgba(42,42,61,.5);cursor:pointer;}
+tr:last-child td{border-bottom:none;}
+tr:hover td{background:rgba(255,255,255,.02);}
+.pill{display:inline-block;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600;}
+.p-red{background:rgba(231,76,60,.15);color:#ff6b6b;}
+.p-orange{background:rgba(243,156,18,.15);color:#f39c12;}
+.p-green{background:rgba(0,184,148,.15);color:#00b894;}
+.p-blue{background:rgba(52,152,219,.15);color:#3498db;}
+.p-gray{background:rgba(144,144,176,.15);color:var(--muted);}
+
+/* Emergency & Contacts */
+.quick-dial{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px;}
+.dial-btn{display:flex;flex-direction:column;align-items:center;gap:5px;
+  background:var(--card);border:1px solid var(--border);border-radius:12px;
+  padding:14px 8px;text-decoration:none;cursor:pointer;transition:all .2s;}
+.dial-btn:hover{border-color:var(--teal);background:rgba(0,184,148,.08);}
+.dial-num{font-size:22px;font-weight:800;color:var(--teal);}
+.dial-lbl{font-size:11px;color:var(--muted);}
+
+.contact-list{display:flex;flex-direction:column;gap:10px;}
+.contact-item{background:var(--card);border:1px solid var(--border);border-radius:12px;
+  padding:14px;display:flex;align-items:center;gap:12px;}
+.c-avatar{width:42px;height:42px;border-radius:50%;
+  background:linear-gradient(135deg,var(--primary),var(--accent));
+  display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;flex-shrink:0;}
+.c-info{flex:1;}
+.c-name{font-size:14px;font-weight:600;}
+.c-phone{font-size:12px;color:var(--muted);margin-top:2px;}
+.c-actions{display:flex;gap:6px;flex-shrink:0;}
+.call-btn{display:flex;align-items:center;gap:4px;
+  background:rgba(0,184,148,.1);border:1px solid rgba(0,184,148,.3);
+  color:var(--teal);border-radius:8px;padding:7px 12px;
+  font-size:12px;font-weight:600;text-decoration:none;cursor:pointer;
+  transition:all .2s;white-space:nowrap;}
+.call-btn:hover{background:rgba(0,184,148,.2);}
+.del-btn{background:rgba(231,76,60,.1);border:1px solid rgba(231,76,60,.2);
+  color:#ff6b6b;border-radius:8px;padding:7px 10px;cursor:pointer;font-size:13px;transition:all .2s;}
+.del-btn:hover{background:rgba(231,76,60,.2);}
+
+/* Forms */
+.form-section{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px;}
+.form-section h3{font-size:14px;font-weight:600;margin-bottom:14px;display:flex;align-items:center;gap:7px;}
+.form-group{margin-bottom:13px;}
+.form-group label{display:block;font-size:10px;font-weight:600;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px;}
+.form-group input,.form-group select{
+  width:100%;background:var(--surface);border:1px solid var(--border);
+  color:var(--text);border-radius:8px;padding:11px 13px;font-size:14px;outline:none;
+  transition:border-color .2s;}
+.form-group input:focus,.form-group select:focus{border-color:var(--accent);}
+.form-group input[readonly]{color:var(--muted);cursor:default;}
+.btn-primary{width:100%;padding:12px;font-size:14px;font-weight:600;
+  background:linear-gradient(135deg,var(--primary),var(--accent));
+  color:#fff;border:none;border-radius:10px;cursor:pointer;transition:all .2s;}
+.btn-primary:hover{opacity:.9;}
+.btn-outline{width:100%;padding:12px;font-size:14px;font-weight:600;
+  background:transparent;color:var(--accent);
+  border:1px solid var(--accent);border-radius:10px;cursor:pointer;margin-top:8px;}
+
+/* Profile */
+.profile-header{display:flex;align-items:center;gap:14px;margin-bottom:16px;}
+.profile-avatar{width:60px;height:60px;border-radius:50%;
+  background:linear-gradient(135deg,var(--primary),var(--accent));
+  display:flex;align-items:center;justify-content:center;
+  font-size:24px;font-weight:700;flex-shrink:0;}
+.profile-name{font-size:18px;font-weight:700;}
+.profile-email{font-size:13px;color:var(--muted);margin-top:2px;}
+.info-row{display:flex;justify-content:space-between;align-items:center;
+  padding:10px 0;border-bottom:1px solid var(--border);font-size:14px;}
+.info-row:last-child{border-bottom:none;}
+.info-label{color:var(--muted);font-size:12px;}
+.info-val{font-weight:500;}
+
+/* pw strength */
+.pw-strength{height:3px;border-radius:2px;background:var(--border);margin-top:5px;overflow:hidden;}
+.pw-bar{height:100%;border-radius:2px;transition:all .3s;}
+
+/* msg */
+.msg{font-size:12px;margin-top:8px;padding:8px 12px;border-radius:7px;}
+.msg-ok{background:rgba(0,184,148,.1);color:#00b894;border:1px solid rgba(0,184,148,.3);}
+.msg-err{background:rgba(231,76,60,.1);color:#ff6b6b;border:1px solid rgba(231,76,60,.3);}
+
+.empty-state{text-align:center;padding:32px 16px;color:var(--muted);}
+.empty-state .icon{font-size:36px;margin-bottom:8px;}
+
+/* Map filters */
+.map-filters{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;}
+.map-filters select{flex:1;background:var(--card);border:1px solid var(--border);
+  color:var(--text);border-radius:8px;padding:8px 10px;font-size:13px;outline:none;}
+</style>
+</head>
+<body>
+
+<!-- Top Bar -->
+<div class="topbar">
+  <div class="topbar-logo">
+    <div class="logo-icon">ðŸ›¡ï¸</div>CrimeWatch
+  </div>
+  <div class="topbar-greeting">Hi, <b id="userGreeting">User</b> ðŸ‘‹</div>
+  <div style="display:flex;gap:6px;">
+    <div class="icon-btn" onclick="getCurrentLocation()" title="Detect Location">ðŸ“</div>
+    <div class="icon-btn" onclick="showPage('profile')" title="Profile">ðŸ‘¤</div>
+    <div class="icon-btn" onclick="doLogout()" title="Logout">â†©ï¸</div>
+  </div>
+</div>
+
+<!-- Pages -->
+<div class="content">
+
+  <!-- â•â• HOME â•â• -->
+  <div class="page active" id="page-home">
+
+    <div class="safety-card" id="safetyCard">
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px;">Current Location Safety</div>
+      <div class="score-row">
+        <div class="score-num" id="scoreNum" style="color:var(--muted);">â€”</div>
+        <div>
+          <div class="risk-badge" id="riskBadge" style="background:rgba(144,144,176,.1);color:var(--muted);">â¬œ SELECT CITY</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:4px;" id="scoreCity">Search or tap ðŸ“</div>
+        </div>
+      </div>
+      <div class="gauge"><div class="gauge-fill" id="gaugeBar" style="width:0%;background:var(--teal);"></div></div>
+      <div id="safetyAdvice" style="font-size:12px;color:var(--muted);">Search a city to see its safety rating</div>
+    </div>
+
+    <div id="alertBanner"></div>
+
+    <div class="loc-search">
+      <span>ðŸ”</span>
+      <input id="cityInput" list="cityDL" placeholder="Type city name e.g. Mumbai..." oninput="onCityType(this.value)"/>
+      <datalist id="cityDL"></datalist>
+      <button class="btn-loc" onclick="getCurrentLocation()">ðŸ“ GPS</button>
+    </div>
+
+    <div class="mini-stats" id="miniStats">
+      <div class="mini-stat"><div class="val" style="color:var(--danger)">â€”</div><div class="lbl">Crimes Nearby</div></div>
+      <div class="mini-stat"><div class="val" style="color:var(--warn)">â€”</div><div class="lbl">Crime Types</div></div>
+      <div class="mini-stat"><div class="val" style="color:var(--teal)">â€”</div><div class="lbl">Open Cases</div></div>
+    </div>
+
+    <div class="section-title">ðŸ—ºï¸ Crime Map (5km Radius)</div>
+    <div id="userMap"></div>
+
+    <div class="chart-card">
+      <div class="chart-title">ðŸ“Š Crime Types in This Area</div>
+      <canvas id="areaChart" height="180"></canvas>
+    </div>
+
+    <div class="section-title">ðŸ“‹ Recent Incidents <span style="font-size:11px;color:var(--muted)">(tap for details)</span></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Date</th><th>Crime</th><th>Domain</th><th>Status</th></tr></thead>
+        <tbody id="incidentBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- â•â• MAP â•â• -->
+  <div class="page" id="page-map">
+    <div class="section-title">ðŸ—ºï¸ National Crime Map</div>
+    <div class="map-filters">
+      <select id="fmCity" onchange="renderFullMap()"><option value="">All Cities</option></select>
+      <select id="fmType" onchange="renderFullMap()"><option value="">All Types</option></select>
+    </div>
+    <div id="fullMap"></div>
+  </div>
+
+  <!-- â•â• CHARTS â•â• -->
+  <div class="page" id="page-charts">
+    <div class="section-title">ðŸ“Š Crime Analytics</div>
+    <div class="chart-card"><div class="chart-title">ðŸ™ï¸ Crimes by City</div><canvas id="cityBar" height="200"></canvas></div>
+    <div class="chart-card"><div class="chart-title">ðŸ” Crime Types Distribution</div><canvas id="typeDnt" height="220"></canvas></div>
+    <div class="chart-card"><div class="chart-title">ðŸ“… Monthly Trend</div><canvas id="monthLine" height="180"></canvas></div>
+    <div class="chart-card"><div class="chart-title">ðŸ”« Weapons Used</div><canvas id="weaponBar" height="180"></canvas></div>
+  </div>
+
+  <!-- â•â• EMERGENCY â•â• -->
+  <div class="page" id="page-emergency">
+    <div class="section-title">ðŸ†˜ Emergency Services</div>
+
+    <div class="quick-dial">
+      <a href="tel:100" class="dial-btn">
+        <div style="font-size:24px;">ðŸš“</div>
+        <div class="dial-num">100</div>
+        <div class="dial-lbl">Police</div>
+      </a>
+      <a href="tel:102" class="dial-btn">
+        <div style="font-size:24px;">ðŸš‘</div>
+        <div class="dial-num">102</div>
+        <div class="dial-lbl">Ambulance</div>
+      </a>
+      <a href="tel:101" class="dial-btn">
+        <div style="font-size:24px;">ðŸš’</div>
+        <div class="dial-num">101</div>
+        <div class="dial-lbl">Fire</div>
+      </a>
+      <a href="tel:1091" class="dial-btn">
+        <div style="font-size:24px;">ðŸ‘©</div>
+        <div class="dial-num">1091</div>
+        <div class="dial-lbl">Women</div>
+      </a>
+      <a href="tel:108" class="dial-btn">
+        <div style="font-size:24px;">ðŸ¥</div>
+        <div class="dial-num">108</div>
+        <div class="dial-lbl">Medical</div>
+      </a>
+      <a href="tel:112" class="dial-btn">
+        <div style="font-size:24px;">ðŸ“ž</div>
+        <div class="dial-num">112</div>
+        <div class="dial-lbl">Emergency</div>
+      </a>
+    </div>
+
+    <div class="form-section">
+      <h3>âž• Add Emergency Contact</h3>
+      <div class="form-group"><label>Name *</label><input id="ec_name" placeholder="e.g. Dad, Mom, Friend"/></div>
+      <div class="form-group"><label>Phone Number *</label><input id="ec_phone" type="tel" placeholder="+91 98765 43210"/></div>
+      <div class="form-group"><label>Relation</label><input id="ec_rel" placeholder="e.g. Father, Sister"/></div>
+      <button class="btn-primary" onclick="addContact()">âž• Add Contact</button>
+      <div id="ec_msg" style="display:none;" class="msg"></div>
+    </div>
+
+    <div class="section-title">ðŸ“ž My Emergency Contacts</div>
+    <div id="contactList"></div>
+  </div>
+
+  <!-- â•â• PROFILE â•â• -->
+  <div class="page" id="page-profile">
+    <div class="section-title">ðŸ‘¤ My Profile</div>
+
+    <div class="form-section">
+      <div class="profile-header">
+        <div class="profile-avatar" id="profAvatar">U</div>
+        <div>
+          <div class="profile-name" id="profName">â€”</div>
+          <div class="profile-email" id="profEmail">â€”</div>
+        </div>
+      </div>
+      <div class="info-row"><span class="info-label">ðŸ“± Phone</span><span class="info-val" id="profPhone">â€”</span></div>
+      <div class="info-row"><span class="info-label">ðŸ—“ï¸ Joined</span><span class="info-val" id="profJoined">â€”</span></div>
+      <div class="info-row"><span class="info-label">ðŸ” Password</span><span class="info-val">â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢</span></div>
+    </div>
+
+    <!-- Edit Profile -->
+    <div class="form-section">
+      <h3>âœï¸ Edit Profile</h3>
+      <div class="form-group"><label>Full Name</label><input id="edit_name" placeholder="Full name"/></div>
+      <div class="form-group"><label>Phone Number</label><input id="edit_phone" type="tel" placeholder="Phone number"/></div>
+      <button class="btn-primary" onclick="saveProfile()">ðŸ’¾ Save Changes</button>
+      <div id="edit_msg" style="display:none;" class="msg"></div>
+    </div>
+
+    <!-- Change Password -->
+    <div class="form-section">
+      <h3>ðŸ” Change Password</h3>
+      <div class="form-group"><label>Current Password</label><input type="password" id="s_cur" placeholder="Current password"/></div>
+      <div class="form-group">
+        <label>New Password (min 8 chars)</label>
+        <input type="password" id="s_new" placeholder="New password" oninput="checkPwStr(this.value)"/>
+        <div class="pw-strength"><div class="pw-bar" id="pwBar"></div></div>
+      </div>
+      <div class="form-group"><label>Confirm Password</label><input type="password" id="s_conf" placeholder="Confirm new password"/></div>
+      <button class="btn-primary" onclick="changePw()">ðŸ” Update Password</button>
+      <div id="pw_msg" style="display:none;" class="msg"></div>
+    </div>
+
+    <button onclick="doLogout()" style="width:100%;padding:13px;background:rgba(231,76,60,.1);
+      border:1px solid rgba(231,76,60,.3);color:#ff6b6b;border-radius:10px;font-size:14px;
+      font-weight:600;cursor:pointer;">â†©ï¸ Sign Out</button>
+  </div>
+
+</div><!-- /content -->
+
+<!-- â•â• Bottom Navigation â•â• -->
+<div class="bottom-nav">
+  <button class="nav-tab active" id="nav-home" onclick="showPage('home')">
+    <span class="ni">ðŸ </span>Home
+  </button>
+  <button class="nav-tab" id="nav-map" onclick="showPage('map')">
+    <span class="ni">ðŸ—ºï¸</span>Map
+  </button>
+
+  <!-- SOS Center Button -->
+  <div class="sos-center" id="sosCenterBtn">
+    <div class="sos-wrap">
+      <div class="sos-ring"></div>
+      <div class="sos-btn" id="sosBtn">ðŸ†˜</div>
+      <svg class="sos-svg" viewBox="0 0 68 68" xmlns="http://www.w3.org/2000/svg">
+        <circle id="sosCircle" cx="34" cy="34" r="30"/>
+      </svg>
+    </div>
+    <div class="sos-label">HOLD 5s</div>
+  </div>
+
+  <button class="nav-tab" id="nav-charts" onclick="showPage('charts')">
+    <span class="ni">ðŸ“Š</span>Charts
+  </button>
+  <button class="nav-tab" id="nav-emergency" onclick="showPage('emergency')">
+    <span class="ni">ðŸ“ž</span>Emergency
+  </button>
+  <button class="nav-tab" id="nav-collector" onclick="openCrimeCollector()" style="position:relative;">
+    <span class="ni">ðŸ”</span>Collector
+    <span id="collectorBadge" style="display:none;position:absolute;top:4px;right:4px;background:#e74c3c;color:#fff;border-radius:50%;font-size:9px;width:14px;height:14px;line-height:14px;text-align:center;font-weight:700;"></span>
+  </button>
+</div>
+
+<!-- SOS Triggered Overlay -->
+<div class="sos-overlay" id="sosOverlay">
+  <div class="sos-big">ðŸ†˜</div>
+  <h2>SOS ALERT SENT!</h2>
+  <p>Your emergency alert has been sent<br/>to the admin with your location.</p>
+  <div class="sos-info" id="sosLocInfo">ðŸ“ Locating you...</div>
+  <p style="font-size:12px;color:rgba(255,255,255,.6);">Emergency services: Call 112 immediately</p>
+  <button class="btn-cancel" onclick="dismissSOS()">âœ… I'm Safe â€“ Dismiss</button>
+</div>
+
+<!-- Crime Detail Modal -->
+<div id="detailModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:300;align-items:center;justify-content:center;padding:16px;">
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:14px;padding:22px;width:100%;max-width:420px;max-height:85vh;overflow-y:auto;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <h3 style="font-size:16px;font-weight:600;">ðŸ” Incident Details</h3>
+      <button onclick="closeDetail()" style="background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;">âœ•</button>
+    </div>
+    <div id="detailContent"></div>
+  </div>
+</div>
+
+<!-- â•â• Crime Collector Modal â•â• -->
+<div id="crimeCollectorModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:400;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto;">
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;width:100%;max-width:500px;margin:auto;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
+      <div>
+        <h3 style="font-size:17px;font-weight:700;margin:0;">ðŸ” Crime Collector</h3>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px;" id="collectorSubtitle">Crime history & rate analysis</div>
+      </div>
+      <button onclick="closeCrimeCollector()" style="background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;">âœ•</button>
+    </div>
+
+    <!-- City selector -->
+    <div style="display:flex;gap:8px;margin-bottom:16px;">
+      <select id="collectorCity" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:9px;font-size:13px;" onchange="loadCollectorData()">
+        <option value="">â€” Select City â€”</option>
+      </select>
+      <button class="btn-primary" onclick="loadCollectorData()" style="padding:9px 14px;font-size:12px;">Load</button>
+    </div>
+
+    <!-- Summary cards -->
+    <div id="collectorSummary" style="display:none;">
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px;" id="collectorStats"></div>
+
+      <!-- Risk + Install -->
+      <div id="collectorRiskCard" style="border-radius:12px;padding:14px;margin-bottom:16px;"></div>
+
+      <!-- Install crime rate button -->
+      <button id="installRateBtn" onclick="installCrimeRate()" style="width:100%;padding:12px;border-radius:10px;border:none;font-size:14px;font-weight:600;cursor:pointer;margin-bottom:16px;background:linear-gradient(135deg,#7c83f5,#e84393);color:#fff;">
+        ðŸ“Œ Install Crime Rate for This Location
+      </button>
+      <div id="installMsg" style="display:none;text-align:center;font-size:12px;padding:8px;border-radius:8px;margin-bottom:12px;"></div>
+
+      <!-- Crime type chart -->
+      <div class="chart-card" style="margin-bottom:16px;">
+        <div class="chart-title">ðŸ“Š Crime Types Distribution</div>
+        <canvas id="collectorChart" height="200"></canvas>
+      </div>
+
+      <!-- Crime history table -->
+      <div class="section-title" style="font-size:13px;margin-bottom:8px;">ðŸ“‹ Crime History (Latest 50)</div>
+      <div class="table-wrap" style="max-height:300px;overflow-y:auto;">
+        <table>
+          <thead><tr><th>Date</th><th>Type</th><th>Domain</th><th>Status</th></tr></thead>
+          <tbody id="collectorTable"></tbody>
+        </table>
+      </div>
+    </div>
+    <div id="collectorEmpty" style="text-align:center;padding:40px;color:var(--muted);">
+      <div style="font-size:40px;margin-bottom:10px;">ðŸ”</div>
+      <p>Select a city to view crime history and rate</p>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="../shared/crime-data-inline.js"></script>
+<script src="../shared/db.js"></script>
+<script>
+'use strict';
+
+// â”€â”€ Auth Guard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+let currentUser = CrimeDB.getSession('user');
+if (!currentUser) { window.location.href = 'login.html'; }
+
+// â”€â”€ Populate dropdowns & greeting â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+const CITIES = Object.keys(CrimeDB.CITY_COORDS).sort();
+const CRIME_TYPES = ['ARSON','ASSAULT','BURGLARY','COUNTERFEITING','CYBERCRIME','DOMESTIC VIOLENCE',
+  'DRUG OFFENSE','EXTORTION','FIREARM OFFENSE','FRAUD','HOMICIDE','IDENTITY THEFT',
+  'ILLEGAL POSSESSION','KIDNAPPING','PUBLIC INTOXICATION','ROBBERY','SEXUAL ASSAULT',
+  'SHOPLIFTING','TRAFFIC VIOLATION','VANDALISM','VEHICLE - STOLEN'];
+
+document.getElementById('userGreeting').textContent = currentUser.name?.split(' ')[0] || 'User';
+
+const cityDL = document.getElementById('cityDL');
+CITIES.forEach(c => { const o = document.createElement('option'); o.value = c; cityDL.appendChild(o); });
+
+['fmCity','fmType'].forEach(id => {
+  const sel = document.getElementById(id);
+  if (!sel) return;
+  if (id === 'fmCity') CITIES.forEach(c => { const o=document.createElement('option');o.value=o.textContent=c;sel.appendChild(o); });
+  if (id === 'fmType') CRIME_TYPES.forEach(t => { const o=document.createElement('option');o.value=o.textContent=t;sel.appendChild(o); });
+});
+
+// â”€â”€ Page Navigation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+const PAGE_IDS = ['home','map','charts','emergency','profile'];
+function showPage(id) {
+  PAGE_IDS.forEach(p => {
+    document.getElementById('page-' + p)?.classList.remove('active');
+    document.getElementById('nav-' + p)?.classList.remove('active');
+  });
+  document.getElementById('page-' + id)?.classList.add('active');
+  document.getElementById('nav-' + id)?.classList.add('active');
+
+  if (id === 'map') { setTimeout(initFullMap, 80); }
+  if (id === 'charts' && !chartsInited) { initGlobalCharts(); chartsInited = true; }
+  if (id === 'emergency') { renderContacts(); }
+  if (id === 'profile') { loadProfile(); }
+}
+
+// â”€â”€ Location & Safety â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+let currentCity = null, userLat = null, userLng = null;
+let userMapObj = null, fullMapObj = null, areaChartObj = null;
+let chartsInited = false;
+
+function getCurrentLocation() {
+  if (!navigator.geolocation) { loadCitySafety('Mumbai'); return; }
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      userLat = pos.coords.latitude;
+      userLng = pos.coords.longitude;
+      let nearest = 'Mumbai', minD = Infinity;
+      Object.entries(CrimeDB.CITY_COORDS).forEach(([city, [lat, lng]]) => {
+        const d = Math.hypot(lat - userLat, lng - userLng);
+        if (d < minD) { minD = d; nearest = city; }
+      });
+      loadCitySafety(nearest);
+    },
+    () => { loadCitySafety('Mumbai'); }
+  );
+}
+
+function onCityType(val) {
+  if (CITIES.includes(val)) loadCitySafety(val);
+}
+
+function loadCitySafety(city) {
+  currentCity = city;
+  document.getElementById('cityInput').value = city;
+
+  const coords = CrimeDB.CITY_COORDS[city];
+  if (coords) { userLat = coords[0]; userLng = coords[1]; }
+
+  const allData = CrimeDB.getCrimeData();
+  const cityData = allData.filter(d => d.city === city);
+  const total = allData.length || 1;
+  const score = Math.min(100, Math.round((cityData.length / total) * 500));
+  const risk = CrimeDB.getRiskLevel(score);
+
+  // Safety card
+  document.getElementById('scoreNum').textContent = score;
+  document.getElementById('scoreNum').style.color = risk.color;
+  document.getElementById('riskBadge').textContent = risk.emoji + ' ' + risk.level + ' RISK';
+  document.getElementById('riskBadge').style.background = risk.color + '22';
+  document.getElementById('riskBadge').style.color = risk.color;
+  document.getElementById('scoreCity').textContent = 'ðŸ“ ' + city;
+  document.getElementById('gaugeBar').style.width = score + '%';
+  document.getElementById('gaugeBar').style.background = risk.color;
+
+  const advice = {
+    HIGH: 'âš ï¸ HIGH RISK â€” Avoid night travel alone. Secure belongings. Call 112 if unsafe.',
+    MEDIUM: 'âš¡ MODERATE â€” Stay alert, keep to busy areas. Avoid isolated spots.',
+    LOW: 'âœ… RELATIVELY SAFE â€” Normal precautions apply. Stay aware of surroundings.'
+  };
+  document.getElementById('safetyAdvice').textContent = advice[risk.level];
+  document.getElementById('safetyAdvice').style.color = risk.color;
+
+  // Alert banner
+  const msgMap = {
+    HIGH: `ðŸ”´ <strong>HIGH CRIME AREA:</strong> ${city} has elevated crime activity. Exercise extreme caution.`,
+    MEDIUM: `ðŸŸ¡ <strong>MODERATE RISK:</strong> ${city} has moderate crime levels. Stay alert.`,
+    LOW: `ðŸŸ¢ <strong>SAFE AREA:</strong> ${city} has relatively low crime activity.`
+  };
+  const clsMap = { HIGH: 'alert-danger', MEDIUM: 'alert-warn', LOW: 'alert-safe' };
+  document.getElementById('alertBanner').innerHTML =
+    `<div class="alert-banner ${clsMap[risk.level]}">${msgMap[risk.level]}</div>`;
+
+  // Mini stats
+  const types = new Set(cityData.map(d => d.crimeType)).size;
+  const open = cityData.filter(d => d.caseClosed !== 'Yes').length;
+  document.getElementById('miniStats').innerHTML = `
+    <div class="mini-stat"><div class="val" style="color:var(--danger)">${cityData.length.toLocaleString()}</div><div class="lbl">Crimes Nearby</div></div>
+    <div class="mini-stat"><div class="val" style="color:var(--warn)">${types}</div><div class="lbl">Crime Types</div></div>
+    <div class="mini-stat"><div class="val" style="color:var(--teal)">${open.toLocaleString()}</div><div class="lbl">Open Cases</div></div>`;
+
+  // Area chart
+  const tc = {};
+  cityData.forEach(d => { tc[d.crimeType] = (tc[d.crimeType] || 0) + 1; });
+  const sorted = Object.entries(tc).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const ctx = document.getElementById('areaChart').getContext('2d');
+  if (areaChartObj) areaChartObj.destroy();
+  const pal = ['#ff6b6b','#f9a825','#7c83f5','#00b894','#3498db','#e91e63','#9c27b0','#ff9800'];
+  areaChartObj = new Chart(ctx, {
+    type: 'bar',
+    data: { labels: sorted.map(t => t[0]), datasets: [{ data: sorted.map(t => t[1]), backgroundColor: pal, borderRadius: 5, borderSkipped: false }] },
+    options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#9090b0', font: { size: 9 } } }, y: { ticks: { color: '#9090b0' } } }, responsive: true }
+  });
+
+  // Incidents table
+  const recent = [...cityData].sort((a, b) => (b.dateOccurrence || '').localeCompare(a.dateOccurrence || '')).slice(0, 40);
+  const dc = { 'Violent Crime': 'p-red', 'Fire Accident': 'p-orange', 'Traffic Fatality': 'p-blue', 'Other Crime': 'p-gray' };
+  document.getElementById('incidentBody').innerHTML = recent.map((d, i) =>
+    `<tr onclick="showDetail(${i},'${city}')">
+      <td>${d.dateOccurrence || 'â€”'}</td>
+      <td><b>${d.crimeType}</b></td>
+      <td><span class="pill ${dc[d.domain] || 'p-gray'}">${d.domain || 'â€”'}</span></td>
+      <td><span class="pill ${d.caseClosed === 'Yes' ? 'p-green' : 'p-orange'}">${d.caseClosed === 'Yes' ? 'Closed' : 'Open'}</span></td>
+    </tr>`).join('') || '<tr><td colspan="4" style="text-align:center;padding:24px;color:var(--muted);">No incidents found</td></tr>';
+
+  // Map
+  initUserMap(city, cityData.slice(0, 600));
+}
+
+// Store for modal
+let lastCityData = [];
+function showDetail(idx, city) {
+  const allData = CrimeDB.getCrimeData();
+  const cityData = allData.filter(d => d.city === city);
+  const recent = [...cityData].sort((a, b) => (b.dateOccurrence || '').localeCompare(a.dateOccurrence || '')).slice(0, 40);
+  const d = recent[idx];
+  if (!d) return;
+  document.getElementById('detailContent').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px;">
+      ${[
+        ['Crime Type', `<b style="color:var(--accent)">${d.crimeType}</b>`],
+        ['City', d.city],
+        ['Date', d.dateOccurrence || 'â€”'],
+        ['Time', d.timeOccurrence || 'â€”'],
+        ['Domain', d.domain || 'â€”'],
+        ['Weapon', d.weapon || 'None'],
+        ['Victim Age', d.victimAge || 'â€”'],
+        ['Victim Gender', d.victimGender === 'M' ? 'ðŸ‘¨ Male' : d.victimGender === 'F' ? 'ðŸ‘© Female' : 'â€”'],
+        ['Police Deployed', d.policeDeployed || 'â€”'],
+        ['Case Status', d.caseClosed === 'Yes' ? 'âœ… Closed' : 'â³ Open'],
+      ].map(([k, v]) => `<div>
+        <div style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">${k}</div>
+        <div style="font-weight:500;">${v}</div>
+      </div>`).join('')}
+    </div>`;
+  const m = document.getElementById('detailModal');
+  m.style.display = 'flex';
+}
+function closeDetail() { document.getElementById('detailModal').style.display = 'none'; }
+
+// â”€â”€ User Map â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function initUserMap(city, data) {
+  const coords = CrimeDB.CITY_COORDS[city] || [20.5937, 78.9629];
+  if (!userMapObj) {
+    userMapObj = L.map('userMap').setView(coords, 12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: 'Â© OpenStreetMap' }).addTo(userMapObj);
+  } else {
+    userMapObj.setView(coords, 12);
+    userMapObj.eachLayer(l => { if (!l._url) userMapObj.removeLayer(l); });
+  }
+  // 5km circle
+  L.circle(coords, { radius: 5000, color: '#e84393', fillColor: '#e84393', fillOpacity: 0.04, weight: 2, dashArray: '6,4' }).addTo(userMapObj);
+  // Markers
+  const colors = { 'Violent Crime': '#e74c3c', 'Fire Accident': '#f39c12', 'Traffic Fatality': '#9b59b6', 'Other Crime': '#3498db' };
+  data.forEach(d => {
+    if (!d.lat || !d.lng) return;
+    L.circleMarker([d.lat, d.lng], { radius: 5, fillColor: colors[d.domain] || '#95a5a6', color: '#fff', weight: 1, fillOpacity: 0.8 })
+      .bindPopup(`<b>${d.crimeType}</b><br/>ðŸ“… ${d.dateOccurrence || 'â€”'}<br/>ðŸ”« ${d.weapon || 'None'}`)
+      .addTo(userMapObj);
+  });
+  // User pin
+  if (userLat && userLng) {
+    L.marker([userLat, userLng], {
+      icon: L.divIcon({ className: '', html: '<div style="background:#e84393;width:14px;height:14px;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.5);"></div>' })
+    }).bindPopup('ðŸ“ Your Location').addTo(userMapObj);
+  }
+}
+
+// â”€â”€ Full Map â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function initFullMap() {
+  if (!fullMapObj) {
+    fullMapObj = L.map('fullMap').setView([20.5937, 78.9629], 5);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: 'Â© OpenStreetMap' }).addTo(fullMapObj);
+  }
+  renderFullMap();
+}
+function renderFullMap() {
+  if (!fullMapObj) return;
+  fullMapObj.eachLayer(l => { if (!l._url) fullMapObj.removeLayer(l); });
+  const cf = document.getElementById('fmCity').value;
+  const tf = document.getElementById('fmType').value;
+  const data = CrimeDB.getCrimeData().filter(d => (!cf || d.city === cf) && (!tf || d.crimeType === tf)).slice(0, 2000);
+  const colors = { 'Violent Crime': '#e74c3c', 'Fire Accident': '#f39c12', 'Traffic Fatality': '#9b59b6', 'Other Crime': '#3498db' };
+  data.forEach(d => {
+    if (!d.lat || !d.lng) return;
+    L.circleMarker([d.lat, d.lng], { radius: 5, fillColor: colors[d.domain] || '#95a5a6', color: '#fff', weight: 1, fillOpacity: 0.75 })
+      .bindPopup(`<b>${d.crimeType}</b><br/>ðŸ“ ${d.city}<br/>ðŸ“… ${d.dateOccurrence || 'â€”'}`)
+      .addTo(fullMapObj);
+  });
+}
+
+// â”€â”€ Global Charts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function initGlobalCharts() {
+  const data = CrimeDB.getCrimeData();
+  const pal = ['#ff6b6b','#f9a825','#7c83f5','#00b894','#3498db','#e91e63','#9c27b0','#ff9800','#4caf50','#2196f3'];
+
+  const cc = {}; data.forEach(d => { cc[d.city] = (cc[d.city] || 0) + 1; });
+  const sc = Object.entries(cc).sort((a, b) => b[1] - a[1]);
+  new Chart(document.getElementById('cityBar'), { type: 'bar', data: { labels: sc.map(c => c[0]), datasets: [{ data: sc.map(c => c[1]), backgroundColor: pal, borderRadius: 5, borderSkipped: false }] }, options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#9090b0', font: { size: 9 } } }, y: { ticks: { color: '#9090b0' } } }, responsive: true } });
+
+  const tc = {}; data.forEach(d => { tc[d.crimeType] = (tc[d.crimeType] || 0) + 1; });
+  const st = Object.entries(tc).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  new Chart(document.getElementById('typeDnt'), { type: 'doughnut', data: { labels: st.map(t => t[0]), datasets: [{ data: st.map(t => t[1]), backgroundColor: pal, borderWidth: 2, borderColor: '#1a1a26' }] }, options: { plugins: { legend: { position: 'bottom', labels: { color: '#9090b0', font: { size: 10 }, boxWidth: 12 } } }, responsive: true } });
+
+  const mc = {}; data.forEach(d => { const m = d.dateOccurrence ? d.dateOccurrence.slice(0, 7) : ''; if (m) mc[m] = (mc[m] || 0) + 1; });
+  const sm = Object.entries(mc).sort((a, b) => a[0].localeCompare(b[0])).slice(-18);
+  new Chart(document.getElementById('monthLine'), { type: 'line', data: { labels: sm.map(m => m[0]), datasets: [{ data: sm.map(m => m[1]), borderColor: '#e84393', backgroundColor: 'rgba(232,67,147,.1)', tension: 0.4, fill: true, pointRadius: 2 }] }, options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#9090b0', font: { size: 9 } } }, y: { ticks: { color: '#9090b0' } } }, responsive: true } });
+
+  const wc = {}; data.forEach(d => { wc[d.weapon || 'None'] = (wc[d.weapon || 'None'] || 0) + 1; });
+  new Chart(document.getElementById('weaponBar'), { type: 'bar', data: { labels: Object.keys(wc), datasets: [{ data: Object.values(wc), backgroundColor: '#7c83f5', borderRadius: 5, borderSkipped: false }] }, options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#9090b0' } }, y: { ticks: { color: '#9090b0' } } }, responsive: true } });
+}
+
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// â”€â”€ SOS BUTTON (Press & Hold 5 seconds) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+const sosBtn    = document.getElementById('sosBtn');
+const sosCircle = document.getElementById('sosCircle');
+const CIRCUM    = 188; // 2Ï€ Ã— 30
+let sosTimer = null, sosInterval = null, sosProgress = 0, sosActive = false;
+
+sosCircle.style.strokeDasharray  = CIRCUM;
+sosCircle.style.strokeDashoffset = CIRCUM;
+
+function sosStart(e) {
+  e.preventDefault();
+  if (sosActive) return;
+  sosProgress = 0;
+  sosBtn.classList.add('pressing');
+  clearInterval(sosInterval);
+  sosInterval = setInterval(() => {
+    sosProgress += 100 / 50; // 5 s = 50 ticks Ã— 100ms
+    const offset = CIRCUM - (sosProgress / 100) * CIRCUM;
+    sosCircle.style.strokeDashoffset = offset;
+    if (sosProgress >= 100) {
+      clearInterval(sosInterval);
+      triggerSOS();
+    }
+  }, 100);
+}
+
+function sosEnd(e) {
+  if (e) e.preventDefault();
+  if (sosActive) return;
+  clearInterval(sosInterval);
+  sosBtn.classList.remove('pressing');
+  // Animate back to 0
+  let cur = sosProgress;
+  const back = setInterval(() => {
+    cur -= 10;
+    if (cur <= 0) { cur = 0; clearInterval(back); }
+    sosCircle.style.strokeDashoffset = CIRCUM - (cur / 100) * CIRCUM;
+    sosProgress = cur;
+  }, 30);
+}
+
+async function triggerSOS() {
+  sosActive = true;
+  sosBtn.classList.remove('pressing');
+  document.getElementById('sosOverlay').classList.add('show');
+  document.getElementById('sosLocInfo').innerHTML = 'ðŸ“ Locating you & gathering nearby places...';
+
+  const send = async (lat, lng) => {
+    // 1) Save basic SOS first so admin sees it immediately
+    const sosRec = CrimeDB.sendSOS(currentUser.id, currentUser.name, lat, lng);
+    document.getElementById('sosLocInfo').innerHTML =
+      `ðŸ“ Lat: ${lat.toFixed(5)}, Lng: ${lng.toFixed(5)}<br/>â³ Fetching nearby places...`;
+
+    // 2) Try to get reverse geocode address + nearby places
+    let address = 'Unknown address', nearbyPlaces = [];
+    try {
+      // Nominatim reverse geocoding
+      const nomRes = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=en`,
+        { headers: { 'User-Agent': 'CrimeWatchIndia/1.0' } }
+      );
+      if (nomRes.ok) {
+        const nomData = await nomRes.json();
+        address = nomData.display_name || 'Unknown address';
+      }
+    } catch(e) {}
+
+    try {
+      // Overpass API: nearby named places within 400m
+      const overpassQ = `[out:json][timeout:10];(node(around:400,${lat},${lng})[name];way(around:400,${lat},${lng})[name];);out 20;`;
+      const ovRes = await fetch(
+        `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(overpassQ)}`
+      );
+      if (ovRes.ok) {
+        const ovData = await ovRes.json();
+        nearbyPlaces = (ovData.elements || [])
+          .filter(el => el.tags && el.tags.name)
+          .slice(0, 15)
+          .map(el => {
+            const tags = el.tags;
+            const type = tags.amenity || tags.shop || tags.tourism || tags.landuse || tags.leisure || tags.office || 'place';
+            return { name: tags.name, type };
+          });
+      }
+    } catch(e) {}
+
+    // 3) Update the SOS record with address + nearby places
+    const sos = JSON.parse(localStorage.getItem('cw_sos_alerts') || '[]');
+    const idx = sos.findIndex(s => s.id === sosRec.id);
+    if (idx !== -1) {
+      sos[idx].address = address;
+      sos[idx].nearbyPlaces = nearbyPlaces;
+      try { localStorage.setItem('cw_sos_alerts', JSON.stringify(sos)); } catch(e) {}
+    }
+
+    // 4) Update overlay display
+    const placesTxt = nearbyPlaces.length
+      ? `<br/>ðŸ“ <b>Nearby:</b> ${nearbyPlaces.slice(0,5).map(p=>`${p.name} (${p.type})`).join(', ')}`
+      : '';
+    document.getElementById('sosLocInfo').innerHTML =
+      `ðŸ“ Lat: ${lat.toFixed(5)}, Lng: ${lng.toFixed(5)}<br/>
+       ðŸ  ${address.length > 80 ? address.slice(0,80)+'â€¦' : address}${placesTxt}`;
+  };
+
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      p => send(p.coords.latitude, p.coords.longitude),
+      () => send(userLat || 0, userLng || 0),
+      { timeout: 8000 }
+    );
+  } else {
+    send(userLat || 0, userLng || 0);
+  }
+}
+
+function dismissSOS() {
+  document.getElementById('sosOverlay').classList.remove('show');
+  sosActive = false;
+  sosProgress = 0;
+  sosCircle.style.strokeDashoffset = CIRCUM;
+}
+
+// Mouse events
+sosBtn.addEventListener('mousedown', sosStart);
+document.addEventListener('mouseup',  sosEnd);
+// Touch events
+sosBtn.addEventListener('touchstart', sosStart, { passive: false });
+sosBtn.addEventListener('touchend',   sosEnd,   { passive: false });
+sosBtn.addEventListener('touchcancel',sosEnd,   { passive: false });
+
+// â”€â”€ Emergency Contacts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function renderContacts() {
+  const contacts = CrimeDB.getEmergencyContacts(currentUser.id);
+  const el = document.getElementById('contactList');
+  if (!contacts.length) {
+    el.innerHTML = '<div class="empty-state"><div class="icon">ðŸ“ž</div><p>No contacts added yet</p></div>';
+    return;
+  }
+  el.innerHTML = '<div class="contact-list">' + contacts.map(c => `
+    <div class="contact-item">
+      <div class="c-avatar">${(c.name || '?')[0].toUpperCase()}</div>
+      <div class="c-info">
+        <div class="c-name">${c.name}</div>
+        <div class="c-phone">${c.phone}${c.rel ? ' Â· ' + c.rel : ''}</div>
+      </div>
+      <div class="c-actions">
+        <a class="call-btn" href="tel:${c.phone.replace(/\s/g,'')}">ðŸ“ž Call</a>
+        <button class="del-btn" onclick="deleteContact('${c.id}')">ðŸ—‘ï¸</button>
+      </div>
+    </div>`).join('') + '</div>';
+}
+
+function addContact() {
+  const name  = document.getElementById('ec_name').value.trim();
+  const phone = document.getElementById('ec_phone').value.trim();
+  const rel   = document.getElementById('ec_rel').value.trim();
+  const msgEl = document.getElementById('ec_msg');
+  msgEl.style.display = 'none';
+  if (!name || !phone) {
+    msgEl.className = 'msg msg-err';
+    msgEl.textContent = 'âš ï¸ Name and phone number are required.';
+    msgEl.style.display = 'block'; return;
+  }
+  const contacts = CrimeDB.getEmergencyContacts(currentUser.id);
+  contacts.push({ id: 'ec_' + Date.now(), name, phone, rel });
+  CrimeDB.saveEmergencyContacts(currentUser.id, contacts);
+  document.getElementById('ec_name').value = '';
+  document.getElementById('ec_phone').value = '';
+  document.getElementById('ec_rel').value = '';
+  msgEl.className = 'msg msg-ok';
+  msgEl.textContent = 'âœ… Contact added! Tap Call to dial.';
+  msgEl.style.display = 'block';
+  setTimeout(() => { msgEl.style.display = 'none'; }, 3000);
+  renderContacts();
+}
+
+function deleteContact(id) {
+  if (!confirm('Remove this contact?')) return;
+  const contacts = CrimeDB.getEmergencyContacts(currentUser.id).filter(c => c.id !== id);
+  CrimeDB.saveEmergencyContacts(currentUser.id, contacts);
+  renderContacts();
+}
+
+// â”€â”€ Profile â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function loadProfile() {
+  document.getElementById('profAvatar').textContent = (currentUser.name || 'U')[0].toUpperCase();
+  document.getElementById('profName').textContent   = currentUser.name  || 'â€”';
+  document.getElementById('profEmail').textContent  = currentUser.email || 'â€”';
+  document.getElementById('profPhone').textContent  = currentUser.phone || 'â€”';
+  document.getElementById('profJoined').textContent = currentUser.createdAt?.slice(0, 10) || 'â€”';
+  document.getElementById('edit_name').value  = currentUser.name  || '';
+  document.getElementById('edit_phone').value = currentUser.phone || '';
+}
+
+function saveProfile() {
+  const name  = document.getElementById('edit_name').value.trim();
+  const phone = document.getElementById('edit_phone').value.trim();
+  const msgEl = document.getElementById('edit_msg');
+  if (!name) {
+    msgEl.className = 'msg msg-err';
+    msgEl.textContent = 'âš ï¸ Name cannot be empty.';
+    msgEl.style.display = 'block'; return;
+  }
+  // Update in localStorage users list
+  const users = CrimeDB.getAllUsers();
+  const idx = users.findIndex(u => u.id === currentUser.id);
+  if (idx !== -1) {
+    users[idx].name  = name;
+    users[idx].phone = phone;
+    localStorage.setItem('cw_users', JSON.stringify(users));
+  }
+  currentUser.name  = name;
+  currentUser.phone = phone;
+  CrimeDB.setSession('user', currentUser);
+  document.getElementById('userGreeting').textContent = name.split(' ')[0];
+  loadProfile();
+  msgEl.className = 'msg msg-ok';
+  msgEl.textContent = 'âœ… Profile updated successfully!';
+  msgEl.style.display = 'block';
+  setTimeout(() => { msgEl.style.display = 'none'; }, 3000);
+}
+
+function checkPwStr(pw) {
+  let s = 0;
+  if (pw.length >= 8) s++;
+  if (/[A-Z]/.test(pw)) s++;
+  if (/[0-9]/.test(pw)) s++;
+  if (/[^A-Za-z0-9]/.test(pw)) s++;
+  const colors = ['#e74c3c','#f39c12','#00b894','#00b894'];
+  const bar = document.getElementById('pwBar');
+  bar.style.width    = (s * 25) + '%';
+  bar.style.background = colors[s - 1] || 'var(--border)';
+}
+
+function changePw() {
+  const cur  = document.getElementById('s_cur').value;
+  const np   = document.getElementById('s_new').value;
+  const cp   = document.getElementById('s_conf').value;
+  const msgEl = document.getElementById('pw_msg');
+  msgEl.style.display = 'none';
+  if (cur !== currentUser.password) {
+    msgEl.className = 'msg msg-err'; msgEl.textContent = 'âŒ Current password is incorrect.'; msgEl.style.display = 'block'; return;
+  }
+  if (np.length < 8) {
+    msgEl.className = 'msg msg-err'; msgEl.textContent = 'âŒ Minimum 8 characters required.'; msgEl.style.display = 'block'; return;
+  }
+  if (np !== cp) {
+    msgEl.className = 'msg msg-err'; msgEl.textContent = 'âŒ Passwords do not match.'; msgEl.style.display = 'block'; return;
+  }
+  CrimeDB.changeUserPassword(currentUser.id, np);
+  currentUser.password = np;
+  CrimeDB.setSession('user', currentUser);
+  msgEl.className = 'msg msg-ok'; msgEl.textContent = 'âœ… Password changed successfully!'; msgEl.style.display = 'block';
+  document.getElementById('s_cur').value = '';
+  document.getElementById('s_new').value = '';
+  document.getElementById('s_conf').value = '';
+}
+
+function doLogout() { CrimeDB.clearSession('user'); window.location.href = 'login.html'; }
+
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// â”€â”€ CRIME COLLECTOR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+let collectorChartObj = null;
+const INSTALLED_RATES_KEY = 'cw_installed_rates';
+
+function openCrimeCollector() {
+  const modal = document.getElementById('crimeCollectorModal');
+  modal.style.display = 'flex';
+  // Populate city dropdown
+  const sel = document.getElementById('collectorCity');
+  sel.innerHTML = '<option value="">â€” Select City â€”</option>';
+  CITIES.forEach(c => {
+    const o = document.createElement('option');
+    o.value = o.textContent = c;
+    // Pre-select current city if known
+    if (c === currentCity) o.selected = true;
+    sel.appendChild(o);
+  });
+  // Auto-load if city already selected
+  if (sel.value) loadCollectorData();
+  else {
+    document.getElementById('collectorSummary').style.display = 'none';
+    document.getElementById('collectorEmpty').style.display = 'block';
+  }
+}
+function closeCrimeCollector() {
+  document.getElementById('crimeCollectorModal').style.display = 'none';
+}
+
+function loadCollectorData() {
+  const city = document.getElementById('collectorCity').value;
+  document.getElementById('collectorSubtitle').textContent = city ? `${city} â€” Crime History & Rate` : 'Crime history & rate analysis';
+  if (!city) {
+    document.getElementById('collectorSummary').style.display = 'none';
+    document.getElementById('collectorEmpty').style.display = 'block';
+    return;
+  }
+
+  const allData = CrimeDB.getCrimeData();
+  const cityData = allData.filter(d => d.city === city);
+  if (!cityData.length) {
+    document.getElementById('collectorSummary').style.display = 'none';
+    document.getElementById('collectorEmpty').style.display = 'block';
+    document.getElementById('collectorEmpty').innerHTML = `<div style="font-size:40px;margin-bottom:10px;">ðŸ“­</div><p>No crime records found for ${city}</p>`;
+    return;
+  }
+
+  document.getElementById('collectorEmpty').style.display = 'none';
+  document.getElementById('collectorSummary').style.display = 'block';
+
+  // Stats
+  const openCases = cityData.filter(d => d.caseClosed !== 'Yes').length;
+  const types = new Set(cityData.map(d => d.crimeType)).size;
+  const score = Math.min(100, Math.round((cityData.length / allData.length) * 1800));
+  const risk = CrimeDB.getRiskLevel(score);
+
+  document.getElementById('collectorStats').innerHTML = `
+    <div style="background:rgba(231,76,60,.1);border:1px solid rgba(231,76,60,.2);border-radius:10px;padding:12px;text-align:center;">
+      <div style="font-size:22px;font-weight:700;color:#e74c3c;">${cityData.length.toLocaleString()}</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:2px;">Total Crimes</div>
+    </div>
+    <div style="background:rgba(249,168,37,.1);border:1px solid rgba(249,168,37,.2);border-radius:10px;padding:12px;text-align:center;">
+      <div style="font-size:22px;font-weight:700;color:#f9a825;">${types}</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:2px;">Crime Types</div>
+    </div>
+    <div style="background:rgba(0,184,148,.1);border:1px solid rgba(0,184,148,.2);border-radius:10px;padding:12px;text-align:center;">
+      <div style="font-size:22px;font-weight:700;color:#00b894;">${openCases}</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:2px;">Open Cases</div>
+    </div>`;
+
+  // Risk card
+  document.getElementById('collectorRiskCard').style.background = `${risk.color}18`;
+  document.getElementById('collectorRiskCard').style.border = `1px solid ${risk.color}44`;
+  document.getElementById('collectorRiskCard').innerHTML = `
+    <div style="display:flex;align-items:center;gap:14px;">
+      <div style="font-size:36px;">${risk.emoji}</div>
+      <div>
+        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;">Crime Risk Level</div>
+        <div style="font-size:20px;font-weight:800;color:${risk.color};">${risk.level}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px;">Safety Score: ${100 - score}/100 â€” ${city}</div>
+      </div>
+    </div>`;
+
+  // Check if already installed
+  updateInstallBtn(city);
+
+  // Crime type chart
+  const tc = {};
+  cityData.forEach(d => { tc[d.crimeType] = (tc[d.crimeType] || 0) + 1; });
+  const sortedTC = Object.entries(tc).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const pal = ['#ff6b6b','#f9a825','#7c83f5','#00b894','#3498db','#e91e63','#9c27b0','#ff9800','#4caf50','#2196f3'];
+
+  if (collectorChartObj) collectorChartObj.destroy();
+  collectorChartObj = new Chart(document.getElementById('collectorChart'), {
+    type: 'bar',
+    data: {
+      labels: sortedTC.map(t => t[0]),
+      datasets: [{ data: sortedTC.map(t => t[1]), backgroundColor: pal, borderRadius: 5, borderSkipped: false }]
+    },
+    options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#9090b0', font: { size: 9 } } }, y: { ticks: { color: '#9090b0' } } }, responsive: true }
+  });
+
+  // Crime history table
+  const dc = { 'Violent Crime': 'p-red', 'Fire Accident': 'p-orange', 'Traffic Fatality': 'p-blue', 'Other Crime': 'p-gray' };
+  const recent = [...cityData].sort((a, b) => (b.dateOccurrence || '').localeCompare(a.dateOccurrence || '')).slice(0, 50);
+  document.getElementById('collectorTable').innerHTML = recent.map(d => `
+    <tr onclick="showCollectorDetail(${JSON.stringify(d).replace(/"/g, '&quot;')})" style="cursor:pointer;">
+      <td>${d.dateOccurrence || 'â€”'}</td>
+      <td><b>${d.crimeType}</b></td>
+      <td><span class="pill ${dc[d.domain] || 'p-gray'}">${d.domain || 'â€”'}</span></td>
+      <td><span class="pill ${d.caseClosed === 'Yes' ? 'p-green' : 'p-orange'}">${d.caseClosed === 'Yes' ? 'Closed' : 'Open'}</span></td>
+    </tr>`).join('') || '<tr><td colspan="4" style="text-align:center;padding:24px;color:var(--muted);">No incidents found</td></tr>';
+}
+
+function showCollectorDetail(d) {
+  document.getElementById('detailContent').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px;">
+      ${[
+        ['Crime Type', `<b style="color:var(--accent)">${d.crimeType}</b>`],
+        ['City', d.city],
+        ['Date', d.dateOccurrence || 'â€”'],
+        ['Time', d.timeOccurrence || 'â€”'],
+        ['Domain', d.domain || 'â€”'],
+        ['Weapon', d.weapon || 'None'],
+        ['Victim Age', d.victimAge || 'â€”'],
+        ['Victim Gender', d.victimGender === 'M' ? 'ðŸ‘¨ Male' : d.victimGender === 'F' ? 'ðŸ‘© Female' : 'â€”'],
+        ['Police Deployed', d.policeDeployed || 'â€”'],
+        ['Case Status', d.caseClosed === 'Yes' ? 'âœ… Closed' : 'â³ Open'],
+      ].map(([k, v]) => `<div>
+        <div style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">${k}</div>
+        <div style="font-weight:500;">${v}</div>
+      </div>`).join('')}
+    </div>`;
+  document.getElementById('detailModal').style.display = 'flex';
+}
+
+function updateInstallBtn(city) {
+  const installed = JSON.parse(localStorage.getItem(INSTALLED_RATES_KEY) || '{}');
+  const btn = document.getElementById('installRateBtn');
+  if (installed[city]) {
+    btn.textContent = `âœ… Installed â€” ${city} Crime Rate`;
+    btn.style.background = 'rgba(0,184,148,.2)';
+    btn.style.border = '1px solid rgba(0,184,148,.4)';
+    btn.style.color = '#00b894';
+  } else {
+    btn.textContent = 'ðŸ“Œ Install Crime Rate for This Location';
+    btn.style.background = 'linear-gradient(135deg,#7c83f5,#e84393)';
+    btn.style.border = 'none';
+    btn.style.color = '#fff';
+  }
+}
+
+function installCrimeRate() {
+  const city = document.getElementById('collectorCity').value;
+  if (!city) return;
+  const allData = CrimeDB.getCrimeData();
+  const cityData = allData.filter(d => d.city === city);
+  const score = Math.min(100, Math.round((cityData.length / allData.length) * 1800));
+  const risk = CrimeDB.getRiskLevel(score);
+  const installed = JSON.parse(localStorage.getItem(INSTALLED_RATES_KEY) || '{}');
+  const isInstalled = !!installed[city];
+
+  if (!isInstalled) {
+    installed[city] = {
+      city, totalCrimes: cityData.length,
+      riskLevel: risk.level, safetyScore: 100 - score,
+      installedAt: new Date().toISOString()
+    };
+    localStorage.setItem(INSTALLED_RATES_KEY, JSON.stringify(installed));
+    const msgEl = document.getElementById('installMsg');
+    msgEl.style.display = 'block';
+    msgEl.style.background = 'rgba(0,184,148,.15)';
+    msgEl.style.border = '1px solid rgba(0,184,148,.3)';
+    msgEl.style.color = '#00b894';
+    msgEl.textContent = `âœ… Crime rate for ${city} installed! Risk: ${risk.level}, Safety Score: ${100 - score}/100`;
+    setTimeout(() => { msgEl.style.display = 'none'; }, 4000);
+    updateInstallBtn(city);
+    // Update badge count
+    updateCollectorBadge();
+  } else {
+    // Uninstall
+    delete installed[city];
+    localStorage.setItem(INSTALLED_RATES_KEY, JSON.stringify(installed));
+    updateInstallBtn(city);
+    updateCollectorBadge();
+  }
+}
+
+function updateCollectorBadge() {
+  const installed = JSON.parse(localStorage.getItem(INSTALLED_RATES_KEY) || '{}');
+  const count = Object.keys(installed).length;
+  const badge = document.getElementById('collectorBadge');
+  if (count > 0) {
+    badge.style.display = 'block';
+    badge.textContent = count;
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+// â”€â”€ Init â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+setTimeout(() => { loadCitySafety('Mumbai'); updateCollectorBadge(); }, 400);
+</script>
+</body>
+</html>
+
