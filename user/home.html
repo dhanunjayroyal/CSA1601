@@ -771,9 +771,29 @@ sosBtn.addEventListener('touchend', sosEnd, { passive: false });
 sosBtn.addEventListener('touchcancel', sosEnd, { passive: false });
 
 // ── Trigger SOS ───────────────────────────────────────────
+function playUserFeedbackSound() {
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+    const ctx = new AudioContextClass();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(1760, ctx.currentTime + 0.25);
+    gain.gain.setValueAtTime(0.35, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.25);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.26);
+  } catch(e){}
+}
+
 async function triggerSOS() {
   sosActive = true;
   sosBtn.classList.remove('pressing');
+  playUserFeedbackSound();
   document.getElementById('sosOverlay').classList.add('show');
   document.getElementById('sosLocInfo').innerHTML = '🚨 Broadcasting urgent emergency SOS to Admin...';
 

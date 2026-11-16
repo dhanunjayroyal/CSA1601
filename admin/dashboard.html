@@ -224,10 +224,18 @@ tr:last-child td{border-bottom:none;}
 <div class="main">
   <div class="header">
     <h2 id="pageTitle">Dashboard</h2>
+    <button id="btnSound" onclick="testOrUnlockSound()" style="display:flex;align-items:center;gap:6px;background:rgba(39,174,96,.12);border:1px solid rgba(39,174,96,.35);color:#27ae60;border-radius:20px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;">
+      <span id="soundIcon">🔊</span> <span id="soundStatus">Sound: Active (Tap to Test)</span>
+    </button>
     <div class="sos-pill" id="sosPill" onclick="sp('sos')">
       <div class="sdot"></div>
       <span id="hSos">0 Active SOS</span>
     </div>
+  </div>
+
+  <div id="audioUnlockBanner" onclick="testOrUnlockSound()" style="display:none;position:fixed;top:68px;right:22px;z-index:999;background:rgba(232,67,147,.18);border:1px solid var(--accent);color:#fff;border-radius:10px;padding:10px 16px;font-size:12px;font-weight:600;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.5);align-items:center;gap:8px;">
+    <span>🔔</span>
+    <span>Browser muted audio. <u>Tap here to enable emergency siren</u>!</span>
   </div>
 
   <div class="content">
@@ -772,41 +780,188 @@ function resetMap() {
 // ── SOS ALERTS + SOUND ─────────────────────────────────
 // ════════════════════════════════════════════════════════
 let lastSOSCount = 0;
-const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+let audioCtx = null;
+let sirenAudioEl = null;
+let soundUnlocked = false;
 
-function playSOSAlarm() {
-  // Generate alarm sound using Web Audio API
-  const beepSequence = [800, 1000, 800, 1000, 800];
-  beepSequence.forEach((freq, i) => {
-    const osc  = audioCtx.createOscillator();
+// 1. In-memory HTML5 Audio WAV Siren (failsafe across all browsers)
+function getSirenAudio() {
+  if (sirenAudioEl) return sirenAudioEl;
+  try {
+    const sampleRate = 22050;
+    const duration = 1.8;
+    const numSamples = Math.floor(sampleRate * duration);
+    const buffer = new ArrayBuffer(44 + numSamples * 2);
+    const view = new DataView(buffer);
+
+    function writeString(offset, str) {
+      for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+    }
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + numSamples * 2, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeString(36, 'data');
+    view.setUint32(40, numSamples * 2, true);
+
+    // Two-tone European police / ambulance siren (960Hz and 700Hz)
+    for (let i = 0; i < numSamples; i++) {
+      const t = i / sampleRate;
+      const freq = (Math.floor(t * 3.5) % 2 === 0) ? 960 : 700;
+      const sample = Math.sin(2 * Math.PI * freq * t) * 0.85;
+      const intSample = Math.max(-32768, Math.min(32767, Math.floor(sample * 32767)));
+      view.setInt16(44 + i * 2, intSample, true);
+    }
+
+    const blob = new Blob([buffer], { type: 'audio/wav' });
+    sirenAudioEl = new Audio(URL.createObjectURL(blob));
+    sirenAudioEl.volume = 1.0;
+  } catch(e) {
+    console.error('Siren Audio error:', e);
+  }
+  return sirenAudioEl;
+}
+
+// 2. Web Audio API Loud Pitch-Modulated Siren
+function playWebAudioSiren() {
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+    if (!audioCtx) audioCtx = new AudioContextClass();
+
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+
+    const now = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(680, now);
+    osc.frequency.linearRampToValueAtTime(980, now + 0.3);
+    osc.frequency.linearRampToValueAtTime(680, now + 0.6);
+    osc.frequency.linearRampToValueAtTime(980, now + 0.9);
+    osc.frequency.linearRampToValueAtTime(680, now + 1.2);
+    osc.frequency.linearRampToValueAtTime(980, now + 1.5);
+    osc.frequency.linearRampToValueAtTime(680, now + 1.8);
+
+    gain.gain.setValueAtTime(0.01, now);
+    gain.gain.exponentialRampToValueAtTime(0.65, now + 0.05);
+    gain.gain.setValueAtTime(0.65, now + 1.7);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 1.9);
+
     osc.connect(gain);
     gain.connect(audioCtx.destination);
-    osc.type = 'square';
-    osc.frequency.value = freq;
-    gain.gain.setValueAtTime(0, audioCtx.currentTime + i * 0.3);
-    gain.gain.linearRampToValueAtTime(0.4, audioCtx.currentTime + i * 0.3 + 0.05);
-    gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + i * 0.3 + 0.25);
-    osc.start(audioCtx.currentTime + i * 0.3);
-    osc.stop(audioCtx.currentTime + i * 0.3 + 0.3);
-  });
+
+    osc.start(now);
+    osc.stop(now + 1.95);
+  } catch(e) {
+    console.error('WebAudio error:', e);
+  }
+}
+
+// 3. Master Play Alarm Function
+function playSOSAlarm() {
+  // Method A: HTML5 Audio
+  try {
+    const audio = getSirenAudio();
+    if (audio) {
+      audio.currentTime = 0;
+      const p = audio.play();
+      if (p && typeof p.then === 'function') {
+        p.then(() => {
+          soundUnlocked = true;
+          updateSoundUI();
+        }).catch(() => {
+          showSoundUnlockBanner();
+        });
+      }
+    }
+  } catch(e){}
+
+  // Method B: Web Audio API (in parallel for maximum loudness)
+  try {
+    playWebAudioSiren();
+  } catch(e){}
+}
+
+function unlockAudio() {
+  soundUnlocked = true;
+  try {
+    if (!audioCtx) {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (AudioContextClass) audioCtx = new AudioContextClass();
+    }
+    if (audioCtx && audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+    const audio = getSirenAudio();
+    if (audio) {
+      audio.muted = true;
+      audio.play().then(() => {
+        audio.pause();
+        audio.currentTime = 0;
+        audio.muted = false;
+        updateSoundUI();
+      }).catch(()=>{});
+    }
+  } catch(e){}
+  updateSoundUI();
+  hideSoundUnlockBanner();
+}
+
+function testOrUnlockSound() {
+  unlockAudio();
+  playSOSAlarm();
+  const el = document.getElementById('soundStatus');
+  if (el) el.textContent = '🔊 Testing Siren...';
+  setTimeout(updateSoundUI, 2200);
+}
+
+function updateSoundUI() {
+  const el = document.getElementById('soundStatus');
+  const ic = document.getElementById('soundIcon');
+  if (!el) return;
+  if (soundUnlocked) {
+    el.textContent = 'Sound: Active (Tap to Test)';
+    if (ic) ic.textContent = '🔊';
+  } else {
+    el.textContent = 'Sound: Tap to Enable';
+    if (ic) ic.textContent = '🔇';
+  }
+}
+
+function showSoundUnlockBanner() {
+  const b = document.getElementById('audioUnlockBanner');
+  if (b) b.style.display = 'flex';
+}
+function hideSoundUnlockBanner() {
+  const b = document.getElementById('audioUnlockBanner');
+  if (b) b.style.display = 'none';
 }
 
 function showSOSAlarm() {
   const el = document.getElementById('sosAlarm');
   el.style.display = 'block';
-  setTimeout(() => { el.style.display = 'none'; }, 6000);
+  setTimeout(() => { el.style.display = 'none'; }, 7000);
 }
 
 function checkNewSOS() {
   const sos = CrimeDB.getSOSAlerts();
   const active = sos.filter(s => s.status === 'active').length;
   if (active > lastSOSCount) {
-    // New SOS came in!
     try { playSOSAlarm(); } catch(e) {}
     showSOSAlarm();
-    document.getElementById('sosPill').classList.add('ringing');
-    setTimeout(() => document.getElementById('sosPill').classList.remove('ringing'), 5000);
+    document.getElementById('sosPill')?.classList.add('ringing');
+    setTimeout(() => document.getElementById('sosPill')?.classList.remove('ringing'), 5000);
   }
   lastSOSCount = active;
   updateSOSBadge(active);
@@ -1113,10 +1268,12 @@ CrimeDB.onUser(u => {
 // Poll for new SOS every 5 seconds as fallback
 setInterval(checkNewSOS, 5000);
 
-// Resume audio context on first user interaction (browser policy)
-document.addEventListener('click', () => {
-  if (audioCtx.state === 'suspended') audioCtx.resume();
-}, { once: true });
+// Automatic user gesture audio unlock across all user events
+['click', 'touchstart', 'keydown'].forEach(evt => {
+  document.addEventListener(evt, () => {
+    if (!soundUnlocked) unlockAudio();
+  }, { passive: true });
+});
 </script>
 </body>
 </html>
