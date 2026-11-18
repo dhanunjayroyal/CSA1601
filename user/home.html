@@ -161,10 +161,12 @@ tr:hover td{background:rgba(255,255,255,.03);cursor:pointer;}
 .sos-label{font-size:8px;font-weight:800;color:#ff6b6b;letter-spacing:.5px;}
 
 .sos-overlay{
-  position:fixed;inset:0;background:rgba(10,10,15,.95);z-index:999;
+  position:fixed;inset:0;background:#0d0d14 !important;z-index:999999 !important;
   display:none;flex-direction:column;align-items:center;justify-content:center;
-  padding:24px;text-align:center;
+  padding:24px;text-align:center;overflow-y:auto;
 }
+body.sos-open .leaflet-control-container{display:none !important;}
+body.sos-open{overflow:hidden !important;}
 .sos-overlay.show{display:flex;}
 .sos-big{
   width:90px;height:90px;border-radius:50%;background:#e74c3c;
@@ -1000,6 +1002,7 @@ async function triggerSOS() {
   sosBtn.classList.remove('pressing');
   startEmergencySiren();
   document.getElementById('sosOverlay').classList.add('show');
+  document.body.classList.add('sos-open');
   document.getElementById('sosLocInfo').innerHTML =
     '<div style="display:flex;align-items:center;gap:10px;"><div class="loader" style="width:16px;height:16px;border:2px solid #e74c3c;border-top-color:transparent;border-radius:50%;animation:spin .8s linear infinite;"></div><span>🚨 Broadcasting urgent emergency SOS to Admin...<br/><small style="color:var(--muted);">Detecting exact GPS & nearby shops / landmarks...</small></span></div>';
 
@@ -1124,6 +1127,7 @@ async function triggerSOS() {
 function dismissSOS() {
   stopEmergencySiren();
   document.getElementById('sosOverlay').classList.remove('show');
+  document.body.classList.remove('sos-open');
   sosActive = false;
   sosProgress = 0;
   if (sosCircle) sosCircle.style.strokeDashoffset = CIRCUM;

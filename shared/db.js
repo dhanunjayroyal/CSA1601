@@ -7,8 +7,8 @@ const CrimeDB = (() => {
   const EMERG_KEY   = 'cw_emergency';
 
   // Cloud Sync Topics on ntfy.sh (free, public, no signup, CORS-enabled pub/sub)
-  const CLOUD_SOS_TOPIC   = 'https://ntfy.sh/cw_csa1601_sos';
-  const CLOUD_USERS_TOPIC = 'https://ntfy.sh/cw_csa1601_users';
+  const REST_SOS_URL   = 'https://api.restful-api.dev/objects/ff808181a09d98f701a1edb85b8a1bf5';
+  const REST_USERS_URL = 'https://api.restful-api.dev/objects/ff808181a09d98f701a1edb909ad1c00';
 
   const CITY_COORDS = {
     'Agra':[27.1767,78.0081],'Ahmedabad':[23.0225,72.5714],'Bangalore':[12.9716,77.5946],
@@ -36,7 +36,7 @@ const CrimeDB = (() => {
     userListeners.forEach(fn => { try { fn(user); } catch(e){} });
   }
 
-  // Same-device cross-tab broadcast
+  // Same-device cross-tab broadcast via BroadcastChannel
   let bChannel = null;
   try {
     if (typeof BroadcastChannel !== 'undefined') {
@@ -59,18 +59,39 @@ const CrimeDB = (() => {
     try { if (bChannel) bChannel.postMessage({ type, payload }); } catch(e){}
   }
 
-  // Publish to Cloud (ntfy.sh) with urgent priority
-  function publishCloud(url, data, priority) {
+  // Cloud Sync via REST Relay (Global, 100% accessible worldwide)
+  function syncSOSToCloud(newAlert) {
     try {
-      fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Priority': priority || '5',
-          'Title': 'CrimeWatch',
-          'Tags': 'rotating_light,sos'
-        },
-        body: JSON.stringify(data)
+      const curList = JSON.parse(localStorage.getItem(SOS_KEY) || '[]');
+      const payload = {
+        name: 'CW_GLOBAL_SOS',
+        data: {
+          alerts: curList.slice(0, 30),
+          lastUpdated: new Date().toISOString()
+        }
+      };
+      fetch(REST_SOS_URL, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).catch(()=>{});
+    } catch(e){}
+  }
+
+  function syncUsersToCloud() {
+    try {
+      const curUsers = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+      const payload = {
+        name: 'CW_GLOBAL_USERS',
+        data: {
+          users: curUsers,
+          lastUpdated: new Date().toISOString()
+        }
+      };
+      fetch(REST_USERS_URL, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
       }).catch(()=>{});
     } catch(e){}
   }
@@ -99,107 +120,69 @@ const CrimeDB = (() => {
     try { localStorage.setItem(USERS_KEY, JSON.stringify(list)); } catch(e){}
   }
 
-  // Connect to Cloud SSE & Fetch Recent History (Runs on any device)
+  let knownSOSIds = new Set();
+  let cloudInitDone = false;
+
   function initCloudSync() {
-    // 1. Fetch recent SOS history (last 72h)
-    fetch(`${CLOUD_SOS_TOPIC}/json?poll=1&since=72h`)
-      .then(res => res.text())
-      .then(txt => {
-        txt.split('\n').forEach(line => {
-          if (!line.trim()) return;
-          try {
-            const ev = JSON.parse(line);
-            if (ev.event === 'message') {
-              const alert = JSON.parse(ev.message);
-              mergeSOS(alert);
-            }
-          } catch(e){}
-        });
-        notifySOS(null, false);
-      }).catch(()=>{});
+    if (cloudInitDone) return;
+    cloudInitDone = true;
 
-    // 2. Fetch recent User registration history
-    fetch(`${CLOUD_USERS_TOPIC}/json?poll=1&since=72h`)
-      .then(res => res.text())
-      .then(txt => {
-        txt.split('\n').forEach(line => {
-          if (!line.trim()) return;
-          try {
-            const ev = JSON.parse(line);
-            if (ev.event === 'message') {
-              const u = JSON.parse(ev.message);
-              mergeUser(u);
-            }
-          } catch(e){}
-        });
-        notifyUser(null);
-      }).catch(()=>{});
+    // Seed known SOS IDs from local storage
+    const initialSOS = JSON.parse(localStorage.getItem(SOS_KEY) || '[]');
+    initialSOS.forEach(s => knownSOSIds.add(s.id));
 
-    // 3. Open Realtime Server-Sent Events stream for SOS
-    try {
-      if (typeof EventSource !== 'undefined') {
-        const sseSOS = new EventSource(`${CLOUD_SOS_TOPIC}/sse`);
-        sseSOS.onmessage = e => {
-          try {
-            const ev = JSON.parse(e.data);
-            if (ev.event === 'message') {
-              const alert = JSON.parse(ev.message);
-              mergeSOS(alert);
-              notifySOS(alert, alert.status === 'active');
-            }
-          } catch(err){}
-        };
-
-        const sseUsers = new EventSource(`${CLOUD_USERS_TOPIC}/sse`);
-        sseUsers.onmessage = e => {
-          try {
-            const ev = JSON.parse(e.data);
-            if (ev.event === 'message') {
-              const u = JSON.parse(ev.message);
-              mergeUser(u);
-              notifyUser(u);
-            }
-          } catch(err){}
-        };
-      }
-    } catch(e){}
-
-    // 4. Fast Cloud Polling (every 1.5 seconds) guarantees <1.5s latency even if SSE drops
-    function fastPoll() {
-      fetch(`${CLOUD_SOS_TOPIC}/json?poll=1&since=20s`)
-        .then(r => r.text())
-        .then(txt => {
-          txt.split('\n').forEach(line => {
-            if (!line.trim()) return;
-            try {
-              const ev = JSON.parse(line);
-              if (ev.event === 'message') {
-                const alert = JSON.parse(ev.message);
-                mergeSOS(alert);
-                notifySOS(alert, alert.status === 'active');
+    function pollCloud() {
+      // 1. Poll SOS Alerts
+      fetch(REST_SOS_URL, { cache: 'no-store' })
+        .then(r => r.json())
+        .then(res => {
+          const cloudAlerts = res?.data?.alerts;
+          if (Array.isArray(cloudAlerts) && cloudAlerts.length) {
+            let latestNewAlert = null;
+            const localList = JSON.parse(localStorage.getItem(SOS_KEY) || '[]');
+            cloudAlerts.forEach(ca => {
+              const existing = localList.find(x => x.id === ca.id);
+              if (!existing) {
+                mergeSOS(ca);
+                if (!knownSOSIds.has(ca.id) && ca.status === 'active') {
+                  latestNewAlert = ca;
+                }
+                knownSOSIds.add(ca.id);
+              } else if (JSON.stringify(existing) !== JSON.stringify(ca)) {
+                mergeSOS(ca);
               }
-            } catch(e){}
-          });
+            });
+            if (latestNewAlert) {
+              notifySOS(latestNewAlert, true);
+            } else {
+              notifySOS(null, false);
+            }
+          }
         }).catch(()=>{});
 
-      fetch(`${CLOUD_USERS_TOPIC}/json?poll=1&since=20s`)
-        .then(r => r.text())
-        .then(txt => {
-          txt.split('\n').forEach(line => {
-            if (!line.trim()) return;
-            try {
-              const ev = JSON.parse(line);
-              if (ev.event === 'message') {
-                const u = JSON.parse(ev.message);
-                mergeUser(u);
-                notifyUser(u);
+      // 2. Poll Users
+      fetch(REST_USERS_URL, { cache: 'no-store' })
+        .then(r => r.json())
+        .then(res => {
+          const cloudUsers = res?.data?.users;
+          if (Array.isArray(cloudUsers) && cloudUsers.length) {
+            let hasNewUser = false;
+            cloudUsers.forEach(cu => {
+              const localList = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+              if (!localList.find(x => x.email === cu.email || x.id === cu.id)) {
+                mergeUser(cu);
+                hasNewUser = true;
               }
-            } catch(e){}
-          });
+            });
+            if (hasNewUser) notifyUser(null);
+          }
         }).catch(()=>{});
     }
 
-    setInterval(fastPoll, 1500);
+    // Initial immediate fetch
+    pollCloud();
+    // Continuous polling every 2 seconds
+    setInterval(pollCloud, 2000);
   }
 
   function seedAdmin(){
@@ -294,7 +277,7 @@ const CrimeDB = (() => {
 
     // Broadcast across tabs and Cloud
     broadcastLocal('USER_NEW', nu);
-    publishCloud(CLOUD_USERS_TOPIC, nu);
+    syncUsersToCloud();
 
     return { success: true, user: nu };
   }
@@ -307,7 +290,7 @@ const CrimeDB = (() => {
     u[i].mustChange = false;
     localStorage.setItem(USERS_KEY, JSON.stringify(u));
     broadcastLocal('USER_UPDATE', u[i]);
-    publishCloud(CLOUD_USERS_TOPIC, u[i]);
+    syncUsersToCloud();
     return true;
   }
 
@@ -350,7 +333,7 @@ const CrimeDB = (() => {
 
     // Broadcast in real-time to other tabs and Cloud across devices
     broadcastLocal('SOS_NEW', s);
-    publishCloud(CLOUD_SOS_TOPIC, s);
+    syncSOSToCloud(s);
 
     return s;
   }
@@ -362,7 +345,7 @@ const CrimeDB = (() => {
     Object.assign(a[i], updates);
     try { localStorage.setItem(SOS_KEY, JSON.stringify(a)); } catch(e){}
     broadcastLocal('SOS_UPDATE', a[i]);
-    publishCloud(CLOUD_SOS_TOPIC, a[i]);
+    syncSOSToCloud(a[i]);
     return a[i];
   }
 
@@ -376,7 +359,7 @@ const CrimeDB = (() => {
       a[i].resolvedAt = new Date().toISOString();
       try { localStorage.setItem(SOS_KEY, JSON.stringify(a)); } catch(e){}
       broadcastLocal('SOS_UPDATE', a[i]);
-      publishCloud(CLOUD_SOS_TOPIC, a[i]);
+      syncSOSToCloud(a[i]);
     }
   }
 
@@ -410,12 +393,17 @@ const CrimeDB = (() => {
     Object.assign(u[i], updates);
     localStorage.setItem(USERS_KEY, JSON.stringify(u));
     broadcastLocal('USER_UPDATE', u[i]);
-    publishCloud(CLOUD_USERS_TOPIC, u[i]);
+    syncUsersToCloud();
     return true;
   }
 
   seedAdmin();
   initCloudSync();
+
+  // Auto-initialize cloud synchronization on page load
+  if (typeof window !== 'undefined') {
+    setTimeout(initCloudSync, 50);
+  }
 
   return {
     CITY_COORDS,

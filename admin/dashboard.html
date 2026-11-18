@@ -1529,6 +1529,18 @@ CrimeDB.onSOS((alert, isNew) => {
       pill.classList.add('ringing');
       setTimeout(() => pill.classList.remove('ringing'), 5000);
     }
+    try {
+      if ('Notification' in window) {
+        if (Notification.permission === 'granted') {
+          new Notification('🚨 CRIMEWATCH: NEW SOS ALERT!', {
+            body: (alert?.userName || 'Citizen') + ' has triggered an emergency SOS! City: ' + (alert?.city || 'Unknown'),
+            requireInteraction: true
+          });
+        } else if (Notification.permission !== 'denied') {
+          Notification.requestPermission();
+        }
+      }
+    } catch(e){}
   }
   const sos = CrimeDB.getSOSAlerts();
   const active = sos.filter(s => s.status === 'active').length;
@@ -1550,6 +1562,12 @@ CrimeDB.onUser(u => {
 setInterval(checkNewSOS, 5000);
 
 // Automatic user gesture audio unlock across all user events
+document.addEventListener('click', () => {
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
+}, { once: true });
+
 ['click', 'touchstart', 'keydown'].forEach(evt => {
   document.addEventListener(evt, () => {
     if (!soundUnlocked) unlockAudio();
