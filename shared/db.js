@@ -54,6 +54,8 @@ const CrimeDB = (() => {
         if (!msg) return;
         if (msg.type === 'SOS_NEW' || msg.type === 'SOS_UPDATE') {
           mergeSOS(msg.payload);
+          // Pre-register ID so cloud poll won't duplicate-notify
+          if (msg.payload && msg.payload.id) knownSOSIds.add(msg.payload.id);
           notifySOS(msg.payload, msg.type === 'SOS_NEW');
         } else if (msg.type === 'USER_NEW' || msg.type === 'USER_UPDATE') {
           mergeUser(msg.payload);
@@ -168,7 +170,12 @@ const CrimeDB = (() => {
     JSON.parse(localStorage.getItem(SOS_KEY) || '[]').forEach(s => knownSOSIds.add(s.id));
     JSON.parse(localStorage.getItem(USERS_KEY) || '[]').forEach(u => { if (u.email) knownUserEmails.add(u.email); });
 
-    function pollSOS() {
+    let pollSOSRunning = false;
+  let lastNotifiedSOSId = null;
+
+  function pollSOS() {
+      if (pollSOSRunning) return; // prevent overlapping concurrent requests
+      pollSOSRunning = true;
       // Add cache-busting ts param so GitHub CDN always returns fresh data
       fetch(SOS_RAW_URL + '?nocache=' + Date.now(), { cache: 'no-store' })
         .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
@@ -187,13 +194,15 @@ const CrimeDB = (() => {
             }
             knownSOSIds.add(ca.id);
           });
-          if (latestNew) {
+          if (latestNew && latestNew.id !== lastNotifiedSOSId) {
+            lastNotifiedSOSId = latestNew.id;
             notifySOS(latestNew, true);
-          } else {
+          } else if (!latestNew) {
             notifySOS(null, false);
           }
+          pollSOSRunning = false;
         })
-        .catch(()=>{});
+        .catch(()=>{ pollSOSRunning = false; });
     }
 
     function pollUsers() {

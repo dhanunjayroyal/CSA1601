@@ -932,28 +932,51 @@ function playWebAudioSiren() {
 }
 
 // 3. Master Play Alarm Function
+let adminAlarmTimer = null;
+let adminAlarmCount = 0;
 function playSOSAlarm() {
-  // Method A: HTML5 Audio
-  try {
-    const audio = getSirenAudio();
-    if (audio) {
-      audio.currentTime = 0;
-      const p = audio.play();
-      if (p && typeof p.then === 'function') {
-        p.then(() => {
-          soundUnlocked = true;
-          updateSoundUI();
-        }).catch(() => {
-          showSoundUnlockBanner();
-        });
-      }
-    }
-  } catch(e){}
+  adminAlarmCount = 0;
+  clearInterval(adminAlarmTimer);
 
-  // Method B: Web Audio API (in parallel for maximum loudness)
-  try {
-    playWebAudioSiren();
-  } catch(e){}
+  function fireAlarm() {
+    // Always try to resume AudioContext first (may be suspended if no prior gesture)
+    try {
+      if (!audioCtx) {
+        const ACls = window.AudioContext || window.webkitAudioContext;
+        if (ACls) audioCtx = new ACls();
+      }
+      if (audioCtx && audioCtx.state === 'suspended') {
+        audioCtx.resume().then(() => { try { playWebAudioSiren(); } catch(e){} }).catch(()=>{});
+      } else {
+        try { playWebAudioSiren(); } catch(e){}
+      }
+    } catch(e){}
+
+    // Method A: HTML5 Audio
+    try {
+      const audio = getSirenAudio();
+      if (audio) {
+        audio.currentTime = 0;
+        const p = audio.play();
+        if (p && typeof p.then === 'function') {
+          p.then(() => {
+            soundUnlocked = true;
+            updateSoundUI();
+          }).catch(() => {
+            showSoundUnlockBanner();
+          });
+        }
+      }
+    } catch(e){}
+  }
+
+  fireAlarm();
+  // Repeat alarm 4 times (every 2.5s) so admin can't miss it
+  adminAlarmTimer = setInterval(() => {
+    adminAlarmCount++;
+    if (adminAlarmCount >= 4) { clearInterval(adminAlarmTimer); return; }
+    fireAlarm();
+  }, 2500);
 }
 
 function unlockAudio() {
@@ -1527,8 +1550,10 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // Realtime cross-device cloud listener for instant SOS and Users
+let lastHandledSOSId = null;
 CrimeDB.onSOS((alert, isNew) => {
-  if (isNew) {
+  if (isNew && alert && alert.id && alert.id !== lastHandledSOSId) {
+    lastHandledSOSId = alert.id;
     try { playSOSAlarm(); } catch(e) {}
     showSOSAlarm();
     const pill = document.getElementById('sosPill');

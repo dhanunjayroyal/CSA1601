@@ -1177,14 +1177,46 @@ async function triggerSOS() {
   };
 
   const coords = CrimeDB.CITY_COORDS[currentCity] || [19.0760, 72.8777];
+  const fallbackLat = userLat || coords[0];
+  const fallbackLng = userLng || coords[1];
   if (navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(
-      p => send(p.coords.latitude, p.coords.longitude),
-      () => send(userLat || coords[0], userLng || coords[1]),
-      { timeout: 4000 }
+    // Use watchPosition to grab the BEST available fix within 8 seconds
+    let bestAccuracy = Infinity;
+    let bestLat = null, bestLng = null;
+    let watchId = null;
+    let resolved = false;
+    const finish = (lat, lng) => {
+      if (resolved) return;
+      resolved = true;
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+      send(lat, lng);
+    };
+    // Timeout fallback
+    const gpsTimeout = setTimeout(() => {
+      finish(bestLat || fallbackLat, bestLng || fallbackLng);
+    }, 9000);
+    watchId = navigator.geolocation.watchPosition(
+      p => {
+        const acc = p.coords.accuracy;
+        if (acc < bestAccuracy) {
+          bestAccuracy = acc;
+          bestLat = p.coords.latitude;
+          bestLng = p.coords.longitude;
+        }
+        // Accept if accuracy <= 30 metres (excellent) or <= 80m after 3s
+        if (acc <= 30 || (acc <= 80 && bestLat !== null)) {
+          clearTimeout(gpsTimeout);
+          finish(bestLat, bestLng);
+        }
+      },
+      () => {
+        clearTimeout(gpsTimeout);
+        finish(bestLat || fallbackLat, bestLng || fallbackLng);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
   } else {
-    send(userLat || coords[0], userLng || coords[1]);
+    send(fallbackLat, fallbackLng);
   }
 }
 
