@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
+<meta http-equiv="Pragma" content="no-cache"/>
+<meta http-equiv="Expires" content="0"/>
 <title>CrimeWatch – Admin Dashboard</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <style>
@@ -316,8 +319,66 @@ tr:last-child td{border-bottom:none;}
               <option value="No">No – Open</option><option value="Yes">Yes – Closed</option>
             </select></div>
           </div>
+                    <div class="fg" style="margin-bottom:14px;">
+            <label>Crime Notes / Details / Signal Text</label>
+            <textarea id="u_desc" rows="2" placeholder="Brief description of incident, signal report, or location details..." style="width:100%;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:inherit;font-size:13px;resize:vertical;"></textarea>
+          </div>
           <button class="btn btn-p btn-lg" onclick="submitCrime()" style="width:100%;">📋 Submit Crime Record</button>
           <div id="upMsg" style="display:none;margin-top:12px;padding:10px 14px;border-radius:8px;font-size:13px;"></div>
+        </div>
+      </div>
+
+      <!-- Bulk CSV/Excel Upload Section -->
+      <div class="tc" style="max-width:700px;margin-top:24px;">
+        <div class="th" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+          <h3>📊 Bulk Upload via CSV / Excel (.xlsx)</h3>
+          <button class="btn btn-sm btn-o" onclick="downloadCsvTemplate()">⬇️ Download CSV Template</button>
+        </div>
+        <div style="padding:22px;">
+          <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">
+            Upload crime records in bulk using an Excel spreadsheet (.xlsx, .xls) or CSV file. This automatically updates city crime statistics, safety scores, and heatmaps.
+          </p>
+
+          <!-- File Drop Zone -->
+          <div id="dropZone" style="border:2px dashed var(--border);border-radius:12px;padding:26px 20px;text-align:center;background:rgba(255,255,255,.02);cursor:pointer;transition:all .2s;" onclick="document.getElementById('bulkFile').click()">
+            <div style="font-size:36px;margin-bottom:8px;">📁</div>
+            <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px;">Drag & drop your Excel (.xlsx) or CSV file here, or click to browse</div>
+            <div style="font-size:12px;color:var(--muted);">Supports .xlsx, .xls, and .csv files with auto-header matching</div>
+            <input type="file" id="bulkFile" accept=".csv,.xlsx,.xls" style="display:none;" onchange="handleBulkFileSelect(event)"/>
+          </div>
+
+          <!-- Or Paste CSV Text directly -->
+          <div style="margin-top:16px;">
+            <details style="cursor:pointer;">
+              <summary style="font-size:12px;color:var(--accent);font-weight:600;padding:6px 0;">📋 Or paste CSV text directly from clipboard</summary>
+              <div style="margin-top:10px;">
+                <textarea id="bulkCsvPaste" rows="4" placeholder="crimeType,city,dateOccurrence,domain,weapon,victimAge,victimGender,description&#10;ROBBERY,Mumbai,2024-05-10,Violent Crime,Knife,28,M,Street mugging&#10;BURGLARY,Delhi,2024-05-11,Other Crime,None,42,F,Shop break-in" style="width:100%;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:monospace;font-size:11px;"></textarea>
+                <button class="btn btn-sm btn-p" onclick="parsePastedCsv()" style="margin-top:8px;">🔍 Parse Pasted CSV</button>
+              </div>
+            </details>
+          </div>
+
+          <!-- Preview & Confirmation Box -->
+          <div id="bulkPreviewBox" style="display:none;margin-top:18px;border-top:1px solid var(--border);padding-top:16px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+              <div style="font-size:13px;font-weight:700;" id="bulkPreviewCount">0 records ready to import</div>
+              <button class="btn btn-p" id="btnConfirmBulk" onclick="confirmBulkImport()">📥 Import All Records Now</button>
+            </div>
+            <div style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;font-size:11px;">
+              <table style="width:100%;border-collapse:collapse;" id="bulkPreviewTable">
+                <thead><tr style="background:var(--surface);">
+                  <th style="padding:6px 8px;text-align:left;">Crime</th>
+                  <th style="padding:6px 8px;text-align:left;">City</th>
+                  <th style="padding:6px 8px;text-align:left;">Date</th>
+                  <th style="padding:6px 8px;text-align:left;">Domain</th>
+                  <th style="padding:6px 8px;text-align:left;">Weapon</th>
+                </tr></thead>
+                <tbody id="bulkPreviewBody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div id="bulkMsg" style="display:none;margin-top:14px;padding:12px;border-radius:8px;font-size:13px;"></div>
         </div>
       </div>
     </div>
@@ -417,6 +478,7 @@ tr:last-child td{border-bottom:none;}
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 <script src="../shared/crime-data-inline.js"></script>
 <script src="../shared/db.js"></script>
 <script>
@@ -518,6 +580,7 @@ function initDashboard() {
   const users = CrimeDB.getAllUsers();
   const sos   = CrimeDB.getSOSAlerts();
   const active = sos.filter(s => s.status === 'active').length;
+  sos.forEach(s => enrichSOSIfMissing(s));
 
   updateSOSBadge(active);
 
@@ -1171,6 +1234,7 @@ function submitCrime() {
     victimGender: document.getElementById('u_gen').value,
     policeDeployed: +document.getElementById('u_pol').value || 0,
     caseClosed: document.getElementById('u_cls').value,
+    description: (document.getElementById('u_desc')?.value || '').trim(),
     dateReported: new Date().toISOString().slice(0, 10)
   });
   msg.style.background = 'rgba(39,174,96,.1)'; msg.style.color = '#27ae60';
@@ -1181,6 +1245,223 @@ function submitCrime() {
 // ════════════════════════════════════════════════════════
 // ── USERS ───────────────────────────────────────────────
 // ════════════════════════════════════════════════════════
+
+// ── Bulk Crime Upload Engine ──────────────────────────────
+let parsedBulkCrimes = [];
+
+function downloadCsvTemplate() {
+  const headers = 'crimeType,city,dateOccurrence,timeOccurrence,domain,weapon,victimAge,victimGender,policeDeployed,caseClosed,description\n';
+  const sample1 = 'ROBBERY,Mumbai,2024-06-15,14:30,Violent Crime,Knife,32,M,2,No,Near railway station market\n';
+  const sample2 = 'BURGLARY,Delhi,2024-06-16,02:15,Other Crime,None,45,F,1,Yes,Commercial shop lock broken\n';
+  const sample3 = 'CYBERCRIME,Bangalore,2024-06-17,11:00,Other Crime,None,29,M,0,No,Online banking phishing scam\n';
+  const blob = new Blob([headers + sample1 + sample2 + sample3], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.setAttribute('download', 'crime_records_template.csv');
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+function handleBulkFileSelect(e) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  const fileName = file.name.toLowerCase();
+
+  if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+    const reader = new FileReader();
+    reader.onload = function(evt) {
+      try {
+        if (typeof XLSX === 'undefined') {
+          showBulkMsg('⚠️ SheetJS library loading. Please try again in a few seconds or use CSV format.', false);
+          return;
+        }
+        const data = new Uint8Array(evt.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const jsonRows = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+        processParsedRows(jsonRows);
+      } catch(err) {
+        showBulkMsg('❌ Failed to parse Excel file: ' + err.message, false);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  } else {
+    // Treat as CSV / Text
+    const reader = new FileReader();
+    reader.onload = function(evt) {
+      parseCsvString(evt.target.result);
+    };
+    reader.readAsText(file);
+  }
+}
+
+function parsePastedCsv() {
+  const text = (document.getElementById('bulkCsvPaste')?.value || '').trim();
+  if (!text) {
+    showBulkMsg('⚠️ Please paste CSV text first.', false);
+    return;
+  }
+  parseCsvString(text);
+}
+
+function parseCsvString(str) {
+  const lines = str.split(/\r?\n/).filter(l => l.trim().length > 0);
+  if (lines.length < 2) {
+    showBulkMsg('⚠️ CSV must have at least a header row and one data row.', false);
+    return;
+  }
+  const delim = lines[0].includes('\t') ? '\t' : lines[0].includes(';') ? ';' : ',';
+  const rawHeaders = lines[0].split(delim).map(h => h.trim().replace(/^["']|["']$/g, ''));
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const cells = [];
+    let inQuote = false, cur = '';
+    for (let c = 0; c < line.length; c++) {
+      const ch = line[c];
+      if (ch === '"') { inQuote = !inQuote; }
+      else if (ch === delim && !inQuote) { cells.push(cur.trim()); cur = ''; }
+      else { cur += ch; }
+    }
+    cells.push(cur.trim());
+
+    const rowObj = {};
+    rawHeaders.forEach((hdr, idx) => {
+      rowObj[hdr] = cells[idx] ? cells[idx].replace(/^["']|["']$/g, '') : '';
+    });
+    rows.push(rowObj);
+  }
+  processParsedRows(rows);
+}
+
+function processParsedRows(rows) {
+  if (!rows || !rows.length) {
+    showBulkMsg('⚠️ No records found in file.', false);
+    return;
+  }
+  const valid = [];
+  rows.forEach(r => {
+    const getKey = (...names) => {
+      for (const n of names) {
+        for (const k of Object.keys(r)) {
+          if (k.toLowerCase().replace(/[^a-z0-9]/g, '') === n.toLowerCase().replace(/[^a-z0-9]/g, '')) {
+            return r[k];
+          }
+        }
+      }
+      return '';
+    };
+
+    const crimeType = (getKey('crimeType', 'type', 'crime', 'offense') || '').toUpperCase().trim();
+    const city = getKey('city', 'location', 'place') || '';
+    let date = getKey('dateOccurrence', 'date', 'occurredDate', 'dateReported') || '';
+    if (!date) date = new Date().toISOString().slice(0, 10);
+    if (typeof date === 'number') {
+      const d = new Date((date - 25569) * 86400 * 1000);
+      date = d.toISOString().slice(0, 10);
+    }
+
+    if (crimeType && city) {
+      valid.push({
+        crimeType,
+        city,
+        dateOccurrence: String(date),
+        timeOccurrence: String(getKey('timeOccurrence', 'time') || '12:00'),
+        domain: getKey('domain', 'category') || 'Violent Crime',
+        weapon: getKey('weapon', 'weaponUsed') || 'None',
+        victimAge: +getKey('victimAge', 'age') || null,
+        victimGender: getKey('victimGender', 'gender') || 'M',
+        policeDeployed: +getKey('policeDeployed', 'police') || 0,
+        caseClosed: String(getKey('caseClosed', 'closed', 'status')).toLowerCase().startsWith('y') ? 'Yes' : 'No',
+        description: getKey('description', 'notes', 'details', 'signal') || ''
+      });
+    }
+  });
+
+  parsedBulkCrimes = valid;
+  if (!valid.length) {
+    showBulkMsg('❌ No valid records found. Make sure columns include "crimeType" and "city".', false);
+    document.getElementById('bulkPreviewBox').style.display = 'none';
+    return;
+  }
+
+  document.getElementById('bulkPreviewBox').style.display = 'block';
+  document.getElementById('bulkPreviewCount').textContent = `✅ ${valid.length} valid records ready to import`;
+  const tbody = document.getElementById('bulkPreviewBody');
+  tbody.innerHTML = valid.slice(0, 8).map(r => `
+    <tr style="border-bottom:1px solid var(--border);">
+      <td style="padding:6px 8px;"><b style="color:var(--accent);">${r.crimeType}</b></td>
+      <td style="padding:6px 8px;">${r.city}</td>
+      <td style="padding:6px 8px;">${r.dateOccurrence}</td>
+      <td style="padding:6px 8px;">${r.domain}</td>
+      <td style="padding:6px 8px;">${r.weapon}</td>
+    </tr>
+  `).join('');
+  if (valid.length > 8) {
+    tbody.innerHTML += `<tr><td colspan="5" style="padding:6px 8px;color:var(--muted);text-align:center;">… and ${valid.length - 8} more records</td></tr>`;
+  }
+  showBulkMsg(`📊 Parsed ${valid.length} records. Review preview above and click "Import All Records Now".`, true);
+}
+
+function confirmBulkImport() {
+  if (!parsedBulkCrimes.length) return;
+  const btn = document.getElementById('btnConfirmBulk');
+  btn.disabled = true;
+  btn.textContent = '⏳ Importing...';
+
+  setTimeout(() => {
+    const count = CrimeDB.addCrimesBulk(parsedBulkCrimes);
+    showBulkMsg(`🎉 Success! ${count} crime records imported into database. City crime rates & maps updated!`, true);
+    parsedBulkCrimes = [];
+    document.getElementById('bulkPreviewBox').style.display = 'none';
+    btn.disabled = false;
+    btn.textContent = '📥 Import All Records Now';
+    try {
+      renderCrimesPage();
+      renderStats();
+    } catch(e){}
+  }, 100);
+}
+
+function showBulkMsg(msg, isOk) {
+  const el = document.getElementById('bulkMsg');
+  if (!el) return;
+  el.style.display = 'block';
+  el.style.background = isOk ? 'rgba(39,174,96,.15)' : 'rgba(198,40,40,.15)';
+  el.style.color = isOk ? '#27ae60' : '#ff6b6b';
+  el.style.border = isOk ? '1px solid rgba(39,174,96,.3)' : '1px solid rgba(198,40,40,.3)';
+  el.textContent = msg;
+}
+
+// ── SOS Enricher (Admin Fallback) ──────────────────────────
+const enrichedSOSIds = new Set();
+function enrichSOSIfMissing(s) {
+  if (!s || !s.id || enrichedSOSIds.has(s.id)) return;
+  if ((!s.address || s.address === 'Unknown address' || !s.nearbyPlaces || !s.nearbyPlaces.length) && s.lat && s.lng) {
+    enrichedSOSIds.add(s.id);
+    fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${s.lat}&lon=${s.lng}&zoom=18&addressdetails=1`, {
+      headers: { 'Accept': 'application/json' }
+    }).then(r => r.json()).then(data => {
+      if (data) {
+        const address = data.display_name || s.address;
+        const addr = data.address || {};
+        const nearby = [...(s.nearbyPlaces || [])];
+        if (addr.amenity && !nearby.some(p=>p.name===addr.amenity)) nearby.push({ name: addr.amenity, type: 'amenity' });
+        if (addr.shop && !nearby.some(p=>p.name===addr.shop)) nearby.push({ name: addr.shop, type: 'shop' });
+        if (addr.hospital && !nearby.some(p=>p.name===addr.hospital)) nearby.push({ name: addr.hospital, type: 'hospital' });
+        if (addr.police && !nearby.some(p=>p.name===addr.police)) nearby.push({ name: addr.police, type: 'police' });
+        if (addr.road && !nearby.some(p=>p.name===addr.road)) nearby.push({ name: addr.road, type: 'road' });
+        if (addr.suburb && !nearby.some(p=>p.name===addr.suburb)) nearby.push({ name: addr.suburb, type: 'suburb' });
+        CrimeDB.updateSOS(s.id, { address, nearbyPlaces: nearby });
+        renderSOS();
+      }
+    }).catch(()=>{});
+  }
+}
+
 function renderUsers() {
   const users = CrimeDB.getAllUsers();
   document.getElementById('userCount').textContent = users.length + ' users';

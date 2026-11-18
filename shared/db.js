@@ -240,6 +240,29 @@ const CrimeDB = (() => {
     return c;
   }
 
+  function addCrimesBulk(records){
+    if (!Array.isArray(records) || !records.length) return 0;
+    const d = getCrimeData();
+    const now = new Date().toISOString();
+    let count = 0;
+    records.forEach((c, idx) => {
+      if (!c.crimeType || !c.city) return;
+      c.id = 'CRM_' + Date.now() + '_' + idx + '_' + Math.floor(Math.random()*1000);
+      const cc = CITY_COORDS[c.city] || [20, 78];
+      if (!c.lat) c.lat = +(cc[0] + (Math.random() - 0.5) * 0.06).toFixed(4);
+      if (!c.lng) c.lng = +(cc[1] + (Math.random() - 0.5) * 0.06).toFixed(4);
+      c.uploadedAt = now;
+      if (!c.dateOccurrence) c.dateOccurrence = now.slice(0, 10);
+      if (!c.domain) c.domain = 'Other Crime';
+      if (!c.weapon) c.weapon = 'None';
+      if (!c.caseClosed) c.caseClosed = 'No';
+      d.push(c);
+      count++;
+    });
+    try { localStorage.setItem(CRIME_KEY, JSON.stringify(d)); } catch(e){}
+    return count;
+  }
+
   function deleteCrime(id){
     const d = getCrimeData().filter(c => c.id !== id);
     localStorage.setItem(CRIME_KEY, JSON.stringify(d));
@@ -396,7 +419,7 @@ const CrimeDB = (() => {
 
   return {
     CITY_COORDS,
-    getCrimeData, addCrime, deleteCrime,
+    getCrimeData, addCrime, addCrimesBulk, deleteCrime,
     loginAdmin, loginUser, registerUser,
     changeUserPassword, changeAdminPassword, updateUser,
     getAllUsers, getAllAdmins,
