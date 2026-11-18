@@ -220,9 +220,10 @@ const CrimeDB = (() => {
     // Run immediately on init
     pollSOS();
     pollUsers();
-    // Then every 3 seconds
-    setInterval(pollSOS, 3000);
-    setInterval(pollUsers, 3000);
+    // SOS polls every 1.2 seconds for near-instant admin alert delivery
+    setInterval(pollSOS, 1200);
+    // Users poll every 5 seconds (less urgent)
+    setInterval(pollUsers, 5000);
   }
 
   function seedAdmin(){

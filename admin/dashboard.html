@@ -1519,6 +1519,13 @@ function doLogout() { CrimeDB.clearSession('admin'); window.location.href = 'log
 // ── Init ──────────────────────────────────────────────────
 setTimeout(initDashboard, 300);
 
+// Instantly re-poll cloud when admin tab becomes focused (catches any missed SOS)
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    try { CrimeDB.initCloudSync(); } catch(e){}
+  }
+});
+
 // Realtime cross-device cloud listener for instant SOS and Users
 CrimeDB.onSOS((alert, isNew) => {
   if (isNew) {
