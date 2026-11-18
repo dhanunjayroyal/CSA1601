@@ -432,9 +432,20 @@ const CrimeDB = (() => {
     return r;
   }
 
-  function setSession(t, o){ sessionStorage.setItem('cw_sess_' + t, JSON.stringify(o)); }
-  function getSession(t){ return JSON.parse(sessionStorage.getItem('cw_sess_' + t) || 'null'); }
-  function clearSession(t){ sessionStorage.removeItem('cw_sess_' + t); }
+  function setSession(t, o){
+    try { localStorage.setItem('cw_sess_' + t, JSON.stringify(o)); } catch(e){}
+    try { sessionStorage.setItem('cw_sess_' + t, JSON.stringify(o)); } catch(e){}
+  }
+  function getSession(t){
+    try {
+      const s = localStorage.getItem('cw_sess_' + t) || sessionStorage.getItem('cw_sess_' + t);
+      return JSON.parse(s || 'null');
+    } catch(e) { return null; }
+  }
+  function clearSession(t){
+    try { localStorage.removeItem('cw_sess_' + t); } catch(e){}
+    try { sessionStorage.removeItem('cw_sess_' + t); } catch(e){}
+  }
 
   function updateUser(id, updates){
     const u = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');

@@ -73,6 +73,12 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--dark);color:va
       <div class="iw"><span class="ic">🔑</span>
         <input type="password" id="pw" placeholder="Password"/>
         <button class="tpw" onclick="togglePw()">👁️</button></div></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin:12px 0 16px;font-size:13px;color:var(--muted);">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;">
+        <input type="checkbox" id="rem" checked style="accent-color:var(--accent);width:16px;height:16px;cursor:pointer;"/>
+        <span>Save admin login details (Remember Me)</span>
+      </label>
+    </div>
     <button class="btn-main" onclick="doLogin()">🔐 Sign In to Admin Panel</button>
     <div class="err" id="err"></div>
     <div class="sec-note">🔒 Restricted to authorized administrators. All access is logged.</div>
@@ -100,15 +106,49 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--dark);color:va
 <script src="../shared/db.js"></script>
 <script>
 let pendingAdmin=null;
+
+// Auto-fill and persistent login check
+(function initSavedAdminLogin() {
+  try {
+    const cur = CrimeDB.getSession('admin');
+    if (cur && cur.id) {
+      window.location.href = 'dashboard.html';
+      return;
+    }
+    const saved = JSON.parse(localStorage.getItem('cw_saved_admin') || 'null');
+    setTimeout(() => {
+      const emEl = document.getElementById('em');
+      const pwEl = document.getElementById('pw');
+      const remEl = document.getElementById('rem');
+      if (saved && saved.email) {
+        if (emEl) emEl.value = saved.email;
+        if (pwEl && saved.password) pwEl.value = saved.password;
+      } else {
+        // Default admin credentials prefilled for convenience
+        if (emEl) emEl.value = 'admin@crimewatch.in';
+        if (pwEl) pwEl.value = 'Admin@2024';
+      }
+      if (remEl) remEl.checked = true;
+    }, 50);
+  } catch(e){}
+})();
 function togglePw(){const i=document.getElementById('pw');i.type=i.type==='password'?'text':'password';}
 function doLogin(){
   const em=document.getElementById('em').value.trim();
   const pw=document.getElementById('pw').value;
+  const rem=document.getElementById('rem')?.checked ?? true;
   const err=document.getElementById('err');
   err.style.display='none';
   if(!em||!pw){err.textContent='⚠️ Please fill in all fields.';err.style.display='block';return;}
   const a=CrimeDB.loginAdmin(em,pw);
   if(!a){err.textContent='⚠️ Invalid email or password.';err.style.display='block';return;}
+
+  if (rem) {
+    try { localStorage.setItem('cw_saved_admin', JSON.stringify({ email: em, password: pw })); } catch(e){}
+  } else {
+    try { localStorage.removeItem('cw_saved_admin'); } catch(e){}
+  }
+
   if(a.mustChange){pendingAdmin=a;document.getElementById('cpModal').classList.add('show');return;}
   CrimeDB.setSession('admin',a);window.location.href='dashboard.html';
 }
@@ -126,6 +166,7 @@ function doChangePw(){
   if(np!==cp){err.textContent='Passwords do not match.';err.style.display='block';return;}
   CrimeDB.changeAdminPassword(pendingAdmin.id,np);
   pendingAdmin.password=np;pendingAdmin.mustChange=false;
+  try { localStorage.setItem('cw_saved_admin', JSON.stringify({ email: pendingAdmin.email, password: np })); } catch(e){}
   CrimeDB.setSession('admin',pendingAdmin);window.location.href='dashboard.html';
 }
 document.addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});

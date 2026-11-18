@@ -72,6 +72,12 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--dark);color:va
         <div class="iw"><span class="ic">📧</span><input type="email" id="l_em" placeholder="your@email.com"/></div></div>
       <div class="fg"><label>Password</label>
         <div class="iw"><span class="ic">🔑</span><input type="password" id="l_pw" placeholder="Password"/></div></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin:12px 0 6px;font-size:13px;color:var(--muted);">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;">
+          <input type="checkbox" id="l_rem" checked style="accent-color:var(--accent);width:16px;height:16px;cursor:pointer;"/>
+          <span>Save login details (Remember Me)</span>
+        </label>
+      </div>
       <div class="note">💡 Default password for new accounts: <b style="color:#00b894">&nbsp;Welcome@123</b></div>
       <button class="btn-main" onclick="doLogin()">🚀 Sign In</button>
       <div class="err" id="l_err"></div>
@@ -114,6 +120,28 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--dark);color:va
 <script src="../shared/db.js"></script>
 <script>
 let pendingUser=null;
+
+// Auto-fill and persistent login check
+(function initSavedLogin() {
+  try {
+    const cur = CrimeDB.getSession('user');
+    if (cur && cur.id && cur.id !== 'user_guest') {
+      window.location.href = 'home.html';
+      return;
+    }
+    const saved = JSON.parse(localStorage.getItem('cw_saved_user') || 'null');
+    if (saved && saved.email) {
+      setTimeout(() => {
+        const emEl = document.getElementById('l_em');
+        const pwEl = document.getElementById('l_pw');
+        const remEl = document.getElementById('l_rem');
+        if (emEl) emEl.value = saved.email || '';
+        if (pwEl && saved.password) pwEl.value = saved.password || '';
+        if (remEl) remEl.checked = true;
+      }, 50);
+    }
+  } catch(e){}
+})();
 function switchTab(t){
   ['login','reg'].forEach(k=>{
     document.getElementById('t-'+k).classList.toggle('active',k===t);
@@ -123,11 +151,19 @@ function switchTab(t){
 function doLogin(){
   const em=document.getElementById('l_em').value.trim();
   const pw=document.getElementById('l_pw').value;
+  const rem=document.getElementById('l_rem')?.checked ?? true;
   const err=document.getElementById('l_err');
   err.style.display='none';
   if(!em||!pw){err.textContent='⚠️ Please fill in all fields.';err.style.display='block';return;}
   const u=CrimeDB.loginUser(em,pw);
   if(!u){err.textContent='⚠️ Invalid email or password.';err.style.display='block';return;}
+  
+  if (rem) {
+    try { localStorage.setItem('cw_saved_user', JSON.stringify({ email: em, password: pw })); } catch(e){}
+  } else {
+    try { localStorage.removeItem('cw_saved_user'); } catch(e){}
+  }
+
   if(u.mustChange){pendingUser=u;document.getElementById('cpModal').classList.add('show');return;}
   CrimeDB.setSession('user',u);window.location.href='home.html';
 }
@@ -161,6 +197,7 @@ function doRegister(){
   // If user entered their own password >= 8 chars, log them in directly!
   if (pw && pw.length >= 8) {
     res.user.mustChange = false;
+    try { localStorage.setItem('cw_saved_user', JSON.stringify({ email: em, password: pw })); } catch(e){}
     CrimeDB.setSession('user', res.user);
     window.location.href = 'home.html';
     return;
@@ -183,6 +220,7 @@ function doChangePw(){
   if(np!==cp){err.textContent='Passwords do not match.';err.style.display='block';return;}
   CrimeDB.changeUserPassword(pendingUser.id,np);
   pendingUser.password=np;pendingUser.mustChange=false;
+  try { localStorage.setItem('cw_saved_user', JSON.stringify({ email: pendingUser.email, password: np })); } catch(e){}
   CrimeDB.setSession('user',pendingUser);window.location.href='home.html';
 }
 document.addEventListener('keydown', e => {
