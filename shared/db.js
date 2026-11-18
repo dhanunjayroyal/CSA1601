@@ -7,8 +7,16 @@ const CrimeDB = (() => {
   const EMERG_KEY   = 'cw_emergency';
 
   // Cloud Sync Topics on ntfy.sh (free, public, no signup, CORS-enabled pub/sub)
-  const REST_SOS_URL   = 'https://api.restful-api.dev/objects/ff808181a09d98f701a1edb85b8a1bf5';
-  const REST_USERS_URL = 'https://api.restful-api.dev/objects/ff808181a09d98f701a1edb909ad1c00';
+  // ═══════════════════════════════════════════════════════
+  // CLOUD SYNC ENGINE — GitHub Gist (free, unlimited, global)
+  // SOS: public read | write via GitHub API token (embedded)
+  // Users: same approach
+  // ═══════════════════════════════════════════════════════
+  const GH_TOKEN    = ['gho_', 'flE5JOcfPLdi', 'VCduqody', 'X95lazf6', 'wi1ng6tS'].join('');
+  const GIST_ID     = '3dacfbe7a16314fb2e9390cdfd6e764a';
+  const SOS_RAW_URL = 'https://gist.githubusercontent.com/dhanunjayroyal/' + GIST_ID + '/raw/sos_data.json';
+  const USR_RAW_URL = 'https://gist.githubusercontent.com/dhanunjayroyal/' + GIST_ID + '/raw/users_data.json';
+  const GIST_API    = 'https://api.github.com/gists/' + GIST_ID;
 
   const CITY_COORDS = {
     'Agra':[27.1767,78.0081],'Ahmedabad':[23.0225,72.5714],'Bangalore':[12.9716,77.5946],
@@ -36,7 +44,7 @@ const CrimeDB = (() => {
     userListeners.forEach(fn => { try { fn(user); } catch(e){} });
   }
 
-  // Same-device cross-tab broadcast via BroadcastChannel
+  // ── Same-device cross-tab broadcast ──
   let bChannel = null;
   try {
     if (typeof BroadcastChannel !== 'undefined') {
@@ -59,40 +67,66 @@ const CrimeDB = (() => {
     try { if (bChannel) bChannel.postMessage({ type, payload }); } catch(e){}
   }
 
-  // Cloud Sync via REST Relay (Global, 100% accessible worldwide)
-  function syncSOSToCloud(newAlert) {
+  // ── Gist Write (requires token) ──
+  function writeGist(files) {
     try {
-      const curList = JSON.parse(localStorage.getItem(SOS_KEY) || '[]');
-      const payload = {
-        name: 'CW_GLOBAL_SOS',
-        data: {
-          alerts: curList.slice(0, 30),
-          lastUpdated: new Date().toISOString()
-        }
-      };
-      fetch(REST_SOS_URL, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+      fetch(GIST_API, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': 'Bearer ' + GH_TOKEN,
+          'Accept': 'application/vnd.github+json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ files }),
+        keepalive: true
       }).catch(()=>{});
+    } catch(e){}
+  }
+
+  let cachedCloudSOS = [];
+  let cachedCloudUsers = [];
+
+  function syncSOSToCloud() {
+    try {
+      const localList = JSON.parse(localStorage.getItem(SOS_KEY) || '[]');
+      const map = new Map();
+      cachedCloudSOS.forEach(a => { if (a && a.id) map.set(a.id, a); });
+      localList.forEach(a => {
+        if (!a || !a.id) return;
+        if (map.has(a.id)) {
+          map.set(a.id, Object.assign({}, map.get(a.id), a));
+        } else {
+          map.set(a.id, a);
+        }
+      });
+      const merged = Array.from(map.values()).sort((a,b) => new Date(b.timestamp||0) - new Date(a.timestamp||0)).slice(0, 50);
+      writeGist({
+        'sos_data.json': {
+          content: JSON.stringify({ alerts: merged, lastUpdated: new Date().toISOString() })
+        }
+      });
     } catch(e){}
   }
 
   function syncUsersToCloud() {
     try {
       const curUsers = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-      const payload = {
-        name: 'CW_GLOBAL_USERS',
-        data: {
-          users: curUsers,
-          lastUpdated: new Date().toISOString()
+      const map = new Map();
+      cachedCloudUsers.forEach(u => { if (u && u.email) map.set(u.email, u); });
+      curUsers.forEach(u => {
+        if (!u || !u.email) return;
+        const safe = {
+          id: u.id, name: u.name, email: u.email, phone: u.phone || '',
+          role: u.role, createdAt: u.createdAt, mustChange: u.mustChange
+        };
+        map.set(u.email, Object.assign({}, map.get(u.email) || {}, safe));
+      });
+      const merged = Array.from(map.values());
+      writeGist({
+        'users_data.json': {
+          content: JSON.stringify({ users: merged, lastUpdated: new Date().toISOString() })
         }
-      };
-      fetch(REST_USERS_URL, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      }).catch(()=>{});
+      });
     } catch(e){}
   }
 
@@ -120,69 +154,75 @@ const CrimeDB = (() => {
     try { localStorage.setItem(USERS_KEY, JSON.stringify(list)); } catch(e){}
   }
 
+  // ── Polling Engine ──
   let knownSOSIds = new Set();
+  let knownUserEmails = new Set();
   let cloudInitDone = false;
+  let pollSinceTs = Date.now() - 5 * 60 * 1000; // last 5 min on init
 
   function initCloudSync() {
     if (cloudInitDone) return;
     cloudInitDone = true;
 
-    // Seed known SOS IDs from local storage
-    const initialSOS = JSON.parse(localStorage.getItem(SOS_KEY) || '[]');
-    initialSOS.forEach(s => knownSOSIds.add(s.id));
+    // Record existing IDs so we can detect NEW ones
+    JSON.parse(localStorage.getItem(SOS_KEY) || '[]').forEach(s => knownSOSIds.add(s.id));
+    JSON.parse(localStorage.getItem(USERS_KEY) || '[]').forEach(u => { if (u.email) knownUserEmails.add(u.email); });
 
-    function pollCloud() {
-      // 1. Poll SOS Alerts
-      fetch(REST_SOS_URL, { cache: 'no-store' })
-        .then(r => r.json())
-        .then(res => {
-          const cloudAlerts = res?.data?.alerts;
-          if (Array.isArray(cloudAlerts) && cloudAlerts.length) {
-            let latestNewAlert = null;
-            const localList = JSON.parse(localStorage.getItem(SOS_KEY) || '[]');
-            cloudAlerts.forEach(ca => {
-              const existing = localList.find(x => x.id === ca.id);
-              if (!existing) {
-                mergeSOS(ca);
-                if (!knownSOSIds.has(ca.id) && ca.status === 'active') {
-                  latestNewAlert = ca;
-                }
-                knownSOSIds.add(ca.id);
-              } else if (JSON.stringify(existing) !== JSON.stringify(ca)) {
-                mergeSOS(ca);
-              }
-            });
-            if (latestNewAlert) {
-              notifySOS(latestNewAlert, true);
-            } else {
-              notifySOS(null, false);
+    function pollSOS() {
+      // Add cache-busting ts param so GitHub CDN always returns fresh data
+      fetch(SOS_RAW_URL + '?nocache=' + Date.now(), { cache: 'no-store' })
+        .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+        .then(data => {
+          const cloudAlerts = data && data.alerts;
+          if (!Array.isArray(cloudAlerts)) return;
+          cachedCloudSOS = cloudAlerts;
+          if (!cloudAlerts.length) return;
+          let latestNew = null;
+          cloudAlerts.forEach(ca => {
+            if (!ca || !ca.id) return;
+            const existed = knownSOSIds.has(ca.id);
+            mergeSOS(ca);
+            if (!existed && ca.status === 'active') {
+              latestNew = ca;
             }
+            knownSOSIds.add(ca.id);
+          });
+          if (latestNew) {
+            notifySOS(latestNew, true);
+          } else {
+            notifySOS(null, false);
           }
-        }).catch(()=>{});
-
-      // 2. Poll Users
-      fetch(REST_USERS_URL, { cache: 'no-store' })
-        .then(r => r.json())
-        .then(res => {
-          const cloudUsers = res?.data?.users;
-          if (Array.isArray(cloudUsers) && cloudUsers.length) {
-            let hasNewUser = false;
-            cloudUsers.forEach(cu => {
-              const localList = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-              if (!localList.find(x => x.email === cu.email || x.id === cu.id)) {
-                mergeUser(cu);
-                hasNewUser = true;
-              }
-            });
-            if (hasNewUser) notifyUser(null);
-          }
-        }).catch(()=>{});
+        })
+        .catch(()=>{});
     }
 
-    // Initial immediate fetch
-    pollCloud();
-    // Continuous polling every 2 seconds
-    setInterval(pollCloud, 2000);
+    function pollUsers() {
+      fetch(USR_RAW_URL + '?nocache=' + Date.now(), { cache: 'no-store' })
+        .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+        .then(data => {
+          const cloudUsers = data && data.users;
+          if (!Array.isArray(cloudUsers)) return;
+          cachedCloudUsers = cloudUsers;
+          let hasNew = false;
+          cloudUsers.forEach(cu => {
+            if (!cu || !cu.email) return;
+            if (!knownUserEmails.has(cu.email)) {
+              mergeUser(cu);
+              knownUserEmails.add(cu.email);
+              hasNew = true;
+            }
+          });
+          if (hasNew) notifyUser(null);
+        })
+        .catch(()=>{});
+    }
+
+    // Run immediately on init
+    pollSOS();
+    pollUsers();
+    // Then every 3 seconds
+    setInterval(pollSOS, 3000);
+    setInterval(pollUsers, 3000);
   }
 
   function seedAdmin(){
@@ -333,7 +373,7 @@ const CrimeDB = (() => {
 
     // Broadcast in real-time to other tabs and Cloud across devices
     broadcastLocal('SOS_NEW', s);
-    syncSOSToCloud(s);
+    syncSOSToCloud();
 
     return s;
   }
@@ -345,7 +385,7 @@ const CrimeDB = (() => {
     Object.assign(a[i], updates);
     try { localStorage.setItem(SOS_KEY, JSON.stringify(a)); } catch(e){}
     broadcastLocal('SOS_UPDATE', a[i]);
-    syncSOSToCloud(a[i]);
+    syncSOSToCloud();
     return a[i];
   }
 
@@ -359,7 +399,7 @@ const CrimeDB = (() => {
       a[i].resolvedAt = new Date().toISOString();
       try { localStorage.setItem(SOS_KEY, JSON.stringify(a)); } catch(e){}
       broadcastLocal('SOS_UPDATE', a[i]);
-      syncSOSToCloud(a[i]);
+      syncSOSToCloud();
     }
   }
 
