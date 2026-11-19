@@ -479,10 +479,38 @@ tr:last-child td{border-bottom:none;}
     <div class="page" id="page-sos">
       <div class="sg" id="sosStats" style="margin-bottom:20px;"></div>
       <div class="tc">
-        <div class="th"><h3>🆘 SOS Alert History</h3>
-          <button class="btn btn-s" onclick="renderSOS()">🔄 Refresh</button>
+        <div class="th" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:16px 20px;">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <h3 style="margin:0;font-size:16px;font-weight:800;color:#fff;">🆘 Emergency SOS Console & History</h3>
+            <span class="pill" id="sosCountPill" style="background:rgba(231,76,60,.18);color:#ff7675;border:1px solid #e74c3c;">0 Alerts</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <button class="btn btn-p" onclick="exportSOSToExcel()" style="background:linear-gradient(135deg,#27ae60,#2ecc71);border:none;box-shadow:0 4px 12px rgba(39,174,96,.3);font-size:12px;font-weight:800;display:flex;align-items:center;gap:6px;cursor:pointer;">
+              📊 Export to Excel (.xlsx)
+            </button>
+            <button class="btn btn-s" onclick="renderSOS()" style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
+              🔄 Refresh
+            </button>
+          </div>
         </div>
-        <div style="padding:16px;" id="sosList"></div>
+
+        <!-- Sub-Tabs: All, Active, Solved Cases, Accidental/Mistake -->
+        <div style="display:flex;gap:8px;padding:12px 20px;border-bottom:1px solid var(--border);background:rgba(0,0,0,.15);flex-wrap:wrap;">
+          <button class="sos-tab-btn active" id="st-all" onclick="setSosFilter('all')">
+            📋 All Records (<span id="countAllTab">0</span>)
+          </button>
+          <button class="sos-tab-btn" id="st-active" onclick="setSosFilter('active')">
+            🚨 Active Emergencies (<span id="countActiveTab">0</span>)
+          </button>
+          <button class="sos-tab-btn" id="st-resolved" onclick="setSosFilter('resolved')">
+            ✅ Solved Cases (<span id="countSolvedTab">0</span>)
+          </button>
+          <button class="sos-tab-btn" id="st-cancelled" onclick="setSosFilter('cancelled')">
+            ⚠️ Accidental / Mistake (<span id="countMistakeTab">0</span>)
+          </button>
+        </div>
+
+        <div style="padding:20px;" id="sosList"></div>
       </div>
     </div>
 
@@ -545,6 +573,111 @@ const enrichedSOSIds = new Set();
 let userMgmtTab = 'active'; // 'active', 'suspended', 'requests'
 let userPendingRemoveId = null;
 let userPendingRemoveName = '';
+let currentSosFilter = 'all'; // 'all', 'active', 'resolved', 'cancelled'
+
+function setSosFilter(filter) {
+  currentSosFilter = filter;
+  ['all', 'active', 'resolved', 'cancelled'].forEach(f => {
+    const btn = document.getElementById('st-' + f);
+    if (btn) btn.classList.toggle('active', f === filter);
+  });
+  renderSOS();
+}
+
+function resolveAlert(id) {
+  if (!confirm('Mark this emergency SOS incident as SOLVED?\n\nThis will archive the alert and generate an updated Excel log.')) return;
+  CrimeDB.resolveSOSAlert(id);
+
+  const remainingActive = CrimeDB.getSOSAlerts().filter(s => s.status === 'active').length;
+  if (remainingActive === 0) {
+    try { stopAdminAlarm(); } catch(e){}
+  }
+
+  try {
+    exportSOSToExcel();
+  } catch(e) {
+    console.error('Auto Excel export error:', e);
+  }
+
+  setSosFilter('resolved');
+  alert('✅ Case #' + id.slice(-6) + ' marked as SOLVED & archived!\nAn updated Excel report has been downloaded.');
+}
+
+function markMistakeAlert(id) {
+  const reason = prompt('Please specify note for marking this alert as accidental / false alarm:', 'False alarm / Accidental citizen trigger');
+  if (reason === null) return;
+
+  CrimeDB.updateSOS(id, {
+    status: 'cancelled',
+    cancelReason: reason || 'Accidental click / false alarm confirmed by admin',
+    resolvedAt: new Date().toISOString()
+  });
+
+  const remainingActive = CrimeDB.getSOSAlerts().filter(s => s.status === 'active').length;
+  if (remainingActive === 0) {
+    try { stopAdminAlarm(); } catch(e){}
+  }
+
+  setSosFilter('cancelled');
+  alert('⚠️ Incident marked as Accidental / False Alarm and moved to history.');
+}
+
+function exportSingleSOSToExcel(id) {
+  const alertItem = CrimeDB.getSOSAlerts().find(s => s.id === id);
+  if (!alertItem) return;
+  exportSOSToExcel([alertItem], `CrimeWatch_Case_${id.slice(-6)}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
+function exportSOSToExcel(customList, customName) {
+  if (typeof XLSX === 'undefined') {
+    alert('Excel exporter library is loading. Please try again in 2 seconds.');
+    return;
+  }
+  const alertsToExport = customList || CrimeDB.getSOSAlerts();
+  if (!alertsToExport || !alertsToExport.length) {
+    alert('No SOS alert records available to export.');
+    return;
+  }
+
+  const rows = alertsToExport.map((s, idx) => ({
+    'Sl No': idx + 1,
+    'Case ID': s.id || 'N/A',
+    'Citizen Name': s.userName || 'Citizen',
+    'Status': (s.status || 'unknown').toUpperCase(),
+    'Triggered Time': s.timestamp ? new Date(s.timestamp).toLocaleString('en-IN') : 'N/A',
+    'Resolved Time': s.resolvedAt ? new Date(s.resolvedAt).toLocaleString('en-IN') : (s.status === 'resolved' ? 'Solved' : 'Pending'),
+    'GPS Latitude': s.lat || 0,
+    'GPS Longitude': s.lng || 0,
+    'GPS Accuracy': s.accuracy ? `±${s.accuracy}m` : 'N/A',
+    'City Area': s.city || 'Unknown',
+    'Street Address': s.address || 'N/A',
+    'Nearby Landmarks & Shops': (s.nearbyPlaces || []).map(p => `${p.type || ''}: ${p.name || ''}`).join(', ') || 'N/A',
+    'Cancellation / Resolution Reason': s.cancelReason || (s.status === 'resolved' ? 'Solved by police/admin dispatch' : '')
+  }));
+
+  const worksheet = XLSX.utils.json_to_sheet(rows);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'SOS_Alert_Records');
+
+  worksheet['!cols'] = [
+    { wch: 6 },
+    { wch: 22 },
+    { wch: 18 },
+    { wch: 16 },
+    { wch: 22 },
+    { wch: 22 },
+    { wch: 14 },
+    { wch: 14 },
+    { wch: 16 },
+    { wch: 16 },
+    { wch: 38 },
+    { wch: 42 },
+    { wch: 30 }
+  ];
+
+  const fileName = customName || `CrimeWatch_SOS_Report_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  XLSX.writeFile(workbook, fileName);
+}
 
 function getPoliceForLocation(lat, lng, city) {
   const policeStations = {
@@ -1366,66 +1499,94 @@ function renderSOS() {
   const activeAlerts = allSos.filter(s => s.status === 'active');
   const resolvedAlerts = allSos.filter(s => s.status === 'resolved');
   const cancelledAlerts = allSos.filter(s => s.status === 'cancelled');
-  const historyAlerts = allSos.filter(s => s.status === 'resolved' || s.status === 'cancelled');
 
   const activeCount = activeAlerts.length;
   updateSOSBadge(activeCount);
 
-  // Tab counters
+  // Update counters
+  const cAll = document.getElementById('countAllTab');
   const cAct = document.getElementById('countActiveTab');
-  const cHist = document.getElementById('countHistoryTab');
-  if (cAct) cAct.textContent = activeCount;
-  if (cHist) cHist.textContent = historyAlerts.length;
+  const cSol = document.getElementById('countSolvedTab');
+  const cMis = document.getElementById('countMistakeTab');
+  const sPill = document.getElementById('sosCountPill');
 
-  document.getElementById('sosStats').innerHTML = `
-    <div class="sc"><div class="sic" style="background:rgba(231,76,60,.14)">🆘</div>
-      <div><div class="sv" style="color:#e74c3c">${activeCount}</div><div class="sl">Active Alerts</div></div></div>
-    <div class="sc"><div class="sic" style="background:rgba(0,184,148,.14)">✅</div>
-      <div><div class="sv" style="color:#00b894">${resolvedAlerts.length}</div><div class="sl">Solved Cases</div></div></div>
-    <div class="sc"><div class="sic" style="background:rgba(243,156,18,.14)">⚠️</div>
-      <div><div class="sv" style="color:#f39c12">${cancelledAlerts.length}</div><div class="sl">Accidental / Mistake</div></div></div>
-    <div class="sc"><div class="sic" style="background:rgba(124,131,245,.14)">📋</div>
-      <div><div class="sv" style="color:#7c83f5">${allSos.length}</div><div class="sl">Total Handled</div></div></div>`;
+  if (cAll) cAll.textContent = allSos.length;
+  if (cAct) cAct.textContent = activeCount;
+  if (cSol) cSol.textContent = resolvedAlerts.length;
+  if (cMis) cMis.textContent = cancelledAlerts.length;
+  if (sPill) sPill.textContent = activeCount > 0 ? `${activeCount} Active` : `${allSos.length} Total`;
+
+  const statsEl = document.getElementById('sosStats');
+  if (statsEl) {
+    statsEl.innerHTML = `
+      <div class="sc" onclick="setSosFilter('active')" style="cursor:pointer;" title="Click to view Active Alerts">
+        <div class="sic" style="background:rgba(231,76,60,.14)">🆘</div>
+        <div><div class="sv" style="color:#e74c3c">${activeCount}</div><div class="sl">Active Alerts</div></div>
+      </div>
+      <div class="sc" onclick="setSosFilter('resolved')" style="cursor:pointer;" title="Click to view Solved Cases">
+        <div class="sic" style="background:rgba(0,184,148,.14)">✅</div>
+        <div><div class="sv" style="color:#00b894">${resolvedAlerts.length}</div><div class="sl">Solved Cases</div></div>
+      </div>
+      <div class="sc" onclick="setSosFilter('cancelled')" style="cursor:pointer;" title="Click to view Accidental Clicks">
+        <div class="sic" style="background:rgba(243,156,18,.14)">⚠️</div>
+        <div><div class="sv" style="color:#f39c12">${cancelledAlerts.length}</div><div class="sl">Accidental / Mistake</div></div>
+      </div>
+      <div class="sc" onclick="setSosFilter('all')" style="cursor:pointer;" title="Click to view All Records">
+        <div class="sic" style="background:rgba(124,131,245,.14)">📋</div>
+        <div><div class="sv" style="color:#7c83f5">${allSos.length}</div><div class="sl">Total Handled</div></div>
+      </div>`;
+  }
 
   // Filter based on currentSosFilter
   let displayList = allSos;
   if (currentSosFilter === 'active') {
     displayList = activeAlerts;
-  } else if (currentSosFilter === 'history') {
-    displayList = historyAlerts;
+  } else if (currentSosFilter === 'resolved') {
+    displayList = resolvedAlerts;
+  } else if (currentSosFilter === 'cancelled') {
+    displayList = cancelledAlerts;
   }
+
+  // Sort by newest first
+  displayList.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+
+  const listEl = document.getElementById('sosList');
+  if (!listEl) return;
 
   if (!displayList.length) {
     let emptyMsg = 'No active SOS alerts at this time. All citizen requests are safe.';
-    if (currentSosFilter === 'history') emptyMsg = 'No previous resolved or cancelled cases in history yet.';
+    if (currentSosFilter === 'resolved') emptyMsg = 'No solved cases recorded yet.';
+    else if (currentSosFilter === 'cancelled') emptyMsg = 'No accidental/mistake clicks recorded.';
     else if (currentSosFilter === 'all') emptyMsg = 'No SOS alerts received yet.';
 
-    document.getElementById('sosList').innerHTML = `<div class="empty">
-      <div class="ei">${currentSosFilter === 'active' ? '🛡️' : '📁'}</div>
-      <p style="font-weight:600;font-size:14px;color:#fff;">${emptyMsg}</p>
-      <div style="font-size:11px;color:var(--muted);margin-top:4px;">Real-time cloud monitoring active via GitHub Gist relay.</div>
+    listEl.innerHTML = `<div class="empty" style="text-align:center;padding:40px 20px;">
+      <div class="ei" style="font-size:36px;margin-bottom:10px;">${currentSosFilter === 'active' ? '🛡️' : currentSosFilter === 'resolved' ? '✅' : '📁'}</div>
+      <p style="font-weight:700;font-size:15px;color:#fff;">${emptyMsg}</p>
+      <div style="font-size:12px;color:var(--muted);margin-top:6px;">Real-time cloud monitoring active via GitHub Gist relay.</div>
     </div>`;
     return;
   }
 
-  document.getElementById('sosList').innerHTML = displayList.map(s => {
+  listEl.innerHTML = displayList.map(s => {
     const isSolved = s.status === 'resolved';
     const isCancelled = s.status === 'cancelled';
     const isActive = s.status === 'active';
 
-    const statusBadge = isSolved ? '<span style="background:rgba(0,184,148,.2);color:#00b894;border:1px solid #00b894;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:800;">✅ SOLVED / CLOSED</span>'
-      : isCancelled ? '<span style="background:rgba(243,156,18,.2);color:#f39c12;border:1px solid #f39c12;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:800;">⚠️ ACCIDENTAL CLICK (MISTAKE)</span>'
+    const statusBadge = isSolved
+      ? '<span style="background:rgba(0,184,148,.2);color:#00b894;border:1px solid #00b894;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:800;">✅ SOLVED / CLOSED</span>'
+      : isCancelled
+      ? '<span style="background:rgba(243,156,18,.2);color:#f39c12;border:1px solid #f39c12;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:800;">⚠️ ACCIDENTAL CLICK (MISTAKE)</span>'
       : '<span style="background:rgba(231,76,60,.25);color:#ff7675;border:1px solid #e74c3c;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:800;animation:badgePop .8s infinite alternate;">🚨 ACTIVE EMERGENCY</span>';
 
     const police = getPoliceForLocation(s.lat, s.lng, s.city);
-    
+
     // Nearby places
     let nearbyHtml = '';
     if (s.nearbyPlaces && s.nearbyPlaces.length) {
       nearbyHtml = `<div style="background:rgba(124,131,245,.08);border:1px solid rgba(124,131,245,.2);border-radius:10px;padding:10px;margin-top:10px;">
         <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-bottom:7px;">📍 Nearby Places & Shops (From Citizen GPS)</div>
         <div style="display:flex;flex-wrap:wrap;gap:6px;">
-          ${s.nearbyPlaces.slice(0,10).map(p=>`<span style="background:rgba(124,131,245,.15);border:1px solid rgba(124,131,245,.25);color:#9ba4fc;border-radius:20px;padding:3px 10px;font-size:11px;">
+          ${s.nearbyPlaces.slice(0, 10).map(p => `<span style="background:rgba(124,131,245,.15);border:1px solid rgba(124,131,245,.25);color:#9ba4fc;border-radius:20px;padding:3px 10px;font-size:11px;">
             ${p.type === 'hospital' ? '🏥' : p.type === 'shop' ? '🏪' : p.type === 'police' ? '🚓' : p.type === 'pharmacy' ? '💊' : p.type === 'fuel' ? '⛽' : p.type === 'bank' ? '🏦' : '📌'} ${p.name}
           </span>`).join('')}
         </div>
@@ -1436,20 +1597,20 @@ function renderSOS() {
     const gmLink  = `https://maps.google.com/?q=${s.lat},${s.lng}`;
     const accText = s.accuracy ? ` <span style="color:#00b894;font-size:11px;font-weight:700;">(±${s.accuracy}m GPS Accuracy)</span>` : '';
 
-    return `<div class="sos-card ${isSolved?'resolved':''}" style="margin-bottom:14px;background:rgba(26,26,38,.85);border:1px solid ${isActive?'rgba(231,76,60,.5)':'rgba(255,255,255,.08)'};padding:16px;border-radius:14px;">
+    return `<div class="sos-card ${isSolved ? 'resolved' : ''}" style="margin-bottom:14px;background:rgba(26,26,38,.85);border:1px solid ${isActive ? 'rgba(231,76,60,.5)' : isSolved ? 'rgba(0,184,148,.3)' : 'rgba(243,156,18,.3)'};padding:16px;border-radius:14px;">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:10px;">
         <div style="display:flex;align-items:center;gap:12px;">
-          <div class="sos-ic" style="font-size:26px;width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:${isActive?'rgba(231,76,60,.2)':'rgba(0,184,148,.15)'}">${isActive?'🆘':'📁'}</div>
+          <div class="sos-ic" style="font-size:26px;width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:${isActive ? 'rgba(231,76,60,.2)' : isSolved ? 'rgba(0,184,148,.15)' : 'rgba(243,156,18,.15)'}">${isActive ? '🆘' : isSolved ? '✅' : '⚠️'}</div>
           <div>
             <div style="font-size:16px;font-weight:800;color:#fff;">${s.userName || 'Citizen'}</div>
-            <div style="font-size:11px;color:var(--muted);margin-top:2px;">📅 Triggered: ${new Date(s.timestamp).toLocaleString()}</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px;">📅 Triggered: ${s.timestamp ? new Date(s.timestamp).toLocaleString() : 'N/A'}</div>
           </div>
         </div>
         <div>${statusBadge}</div>
       </div>
 
       <div style="background:rgba(0,0,0,.25);padding:10px 12px;border-radius:8px;font-size:12px;line-height:1.7;margin-bottom:10px;">
-        📍 <b>Exact Coordinates:</b> ${(s.lat||0).toFixed(5)}° N, ${(s.lng||0).toFixed(5)}° E${accText}<br/>
+        📍 <b>Exact Coordinates:</b> ${(s.lat || 0).toFixed(5)}° N, ${(s.lng || 0).toFixed(5)}° E${accText}<br/>
         🏠 <b>Street Address:</b> ${s.address || 'Locating street address...'}<br/>
         🏙️ <b>City Area:</b> ${s.city || 'Unknown'}
         <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
@@ -1467,11 +1628,23 @@ function renderSOS() {
       </div>
 
       ${s.cancelReason ? `<div style="margin-top:10px;padding:8px 10px;background:rgba(243,156,18,.12);border:1px solid rgba(243,156,18,.3);border-radius:8px;font-size:11px;color:#f39c12;">
-        <b>⚠️ Cancellation Note:</b> ${s.cancelReason}
+        <b>⚠️ Cancellation / Mistake Note:</b> ${s.cancelReason}
       </div>` : ''}
 
-      <div style="display:flex;gap:10px;margin-top:14px;justify-content:flex-end;align-items:center;">
-        ${isActive ? `<button class="btn btn-p" onclick="resolveAlert('${s.id}')" style="background:linear-gradient(135deg,#00b894,#00cec9);border:none;padding:8px 18px;font-weight:800;font-size:12px;box-shadow:0 4px 12px rgba(0,184,148,.3);">✅ Mark as SOLVED & Archive</button>` : `<span style="font-size:11px;color:var(--muted);">Resolved on ${s.resolvedAt ? new Date(s.resolvedAt).toLocaleString() : 'Done'}</span>`}
+      <div style="display:flex;gap:10px;margin-top:14px;justify-content:flex-end;align-items:center;flex-wrap:wrap;">
+        ${isActive ? `
+          <button class="btn btn-p" onclick="resolveAlert('${s.id}')" style="background:linear-gradient(135deg,#00b894,#00cec9);border:none;padding:8px 18px;font-weight:800;font-size:12px;box-shadow:0 4px 12px rgba(0,184,148,.3);cursor:pointer;">
+            ✅ Mark as SOLVED & Archive
+          </button>
+          <button onclick="markMistakeAlert('${s.id}')" style="background:rgba(243,156,18,.15);border:1px solid rgba(243,156,18,.35);color:#f39c12;padding:8px 14px;border-radius:8px;font-weight:700;font-size:12px;cursor:pointer;">
+            ⚠️ Mark as Mistake
+          </button>
+        ` : `
+          <span style="font-size:11px;color:var(--muted);">Archived on ${s.resolvedAt ? new Date(s.resolvedAt).toLocaleString() : 'Done'}</span>
+          <button onclick="exportSingleSOSToExcel('${s.id}')" style="background:rgba(39,174,96,.15);border:1px solid rgba(39,174,96,.35);color:#2ecc71;padding:6px 12px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;">
+            📊 Export Case (.xlsx)
+          </button>
+        `}
       </div>
     </div>`;
   }).join('');
