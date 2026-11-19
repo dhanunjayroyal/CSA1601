@@ -83,7 +83,7 @@ body{
   overflow:hidden;margin-bottom:14px;background:#151520;
 }
 .leaflet-tile{
-  opacity: 0.96;
+  filter: brightness(0.65) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.75);
 }
 .chart-card{
   background:var(--card);border:1px solid var(--border);border-radius:14px;
@@ -786,9 +786,8 @@ function initUserMap(city, data) {
       preferCanvas: true
     }).setView(coords, 12);
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '© CartoDB, © OpenStreetMap',
-      subdomains: 'abcd',
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors',
       maxZoom: 19
     }).addTo(userMapObj);
   } else {
@@ -842,9 +841,8 @@ function initFullMap() {
       preferCanvas: true
     }).setView([20.5937, 78.9629], 5);
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '© CartoDB, © OpenStreetMap',
-      subdomains: 'abcd',
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors',
       maxZoom: 19
     }).addTo(fullMapObj);
   }

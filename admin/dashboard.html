@@ -88,7 +88,7 @@ canvas{max-width:100%;}
 
 /*── Map ──*/
 #adminMap{height:460px;border-radius:0 0 12px 12px;background:#151520;}
-.leaflet-tile{opacity:0.96;}
+.leaflet-tile{filter:brightness(0.65) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.75);}
 .map-header{background:var(--card);border:1px solid var(--border);border-radius:12px 12px 0 0;
   padding:14px 18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
 .map-header h3{font-size:14px;font-weight:600;flex:1;}
@@ -1285,9 +1285,8 @@ function initAdminMap() {
         preferCanvas: true
       }).setView([20.5937, 78.9629], 5);
 
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '© CartoDB, © OpenStreetMap',
-        subdomains: 'abcd',
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors',
         maxZoom: 19
       }).addTo(aMap);
 
