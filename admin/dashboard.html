@@ -233,20 +233,24 @@ tr:last-child td{border-bottom:none;}
 </style>
 </head>
 <body>
-<!-- Emergency SOS Full-Width Persistent Alert Bar -->
-<div id="activeSosTopBanner" style="display:none;position:sticky;top:0;left:0;right:0;z-index:99999;background:linear-gradient(135deg,#c0392b,#e74c3c);color:#fff;padding:12px 24px;box-shadow:0 4px 25px rgba(231,76,60,.6);animation:sosPulse 1.2s infinite alternate;">
-  <div style="max-width:1400px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
-    <div style="display:flex;align-items:center;gap:12px;">
-      <span style="font-size:26px;animation:spin 1.5s infinite linear;">🚨</span>
+<!-- Floating Emergency SOS Notification Toast (Never overcomes/blocks screen) -->
+<div id="activeSosTopBanner" style="display:none;position:fixed;top:18px;right:22px;z-index:999999;max-width:440px;width:calc(100% - 44px);background:rgba(20,22,30,0.96);backdrop-filter:blur(14px);border:2px solid #e74c3c;border-radius:14px;box-shadow:0 12px 35px rgba(231,76,60,0.45);padding:14px 18px;color:#fff;">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <div style="font-size:22px;width:36px;height:36px;border-radius:50%;background:rgba(231,76,60,0.2);display:flex;align-items:center;justify-content:center;border:1px solid #e74c3c;">🚨</div>
       <div>
-        <div style="font-size:15px;font-weight:900;letter-spacing:.6px;">URGENT: CITIZEN SOS ACTIVE! <span id="topBannerUser" style="text-decoration:underline;">Citizen</span></div>
-        <div style="font-size:12px;opacity:.95;" id="topBannerLoc">📍 Detecting location...</div>
+        <div style="font-size:11px;font-weight:900;color:#ff7675;text-transform:uppercase;letter-spacing:0.8px;">EMERGENCY SOS ACTIVE</div>
+        <div style="font-size:15px;font-weight:800;color:#fff;" id="topBannerUser">Citizen</div>
       </div>
     </div>
-    <div style="display:flex;gap:10px;align-items:center;">
-      <button onclick="showPage('sos'); stopAdminAlarm();" style="background:#fff;color:#c0392b;border:none;border-radius:8px;padding:7px 16px;font-weight:800;font-size:12px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.2);">📍 Respond & View Location</button>
-      <button onclick="stopAdminAlarm();" style="background:rgba(0,0,0,.35);color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:8px;padding:7px 14px;font-size:12px;cursor:pointer;">🔕 Mute Siren</button>
-    </div>
+    <button onclick="dismissTopBanner()" style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:#aaa;font-size:14px;cursor:pointer;padding:3px 8px;border-radius:6px;line-height:1;" title="Dismiss notification">✕</button>
+  </div>
+  <div style="font-size:12px;color:#cbd5e1;margin:10px 0 12px;background:rgba(0,0,0,0.35);padding:8px 10px;border-radius:8px;line-height:1.5;border-left:3px solid #e74c3c;" id="topBannerLoc">
+    📍 Detecting location...
+  </div>
+  <div style="display:flex;gap:8px;justify-content:flex-end;">
+    <button onclick="sp('sos'); stopAdminAlarm(); dismissTopBanner();" style="background:linear-gradient(135deg,#e74c3c,#c0392b);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-weight:800;font-size:12px;cursor:pointer;box-shadow:0 3px 10px rgba(231,76,60,0.35);">📍 Open SOS Console</button>
+    <button onclick="stopAdminAlarm();" style="background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.2);border-radius:8px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;">🔕 Mute Siren</button>
   </div>
 </div>
 
@@ -582,6 +586,11 @@ function setSosFilter(filter) {
     if (btn) btn.classList.toggle('active', f === filter);
   });
   renderSOS();
+}
+
+function dismissTopBanner() {
+  const topBanner = document.getElementById('activeSosTopBanner');
+  if (topBanner) topBanner.style.display = 'none';
 }
 
 function resolveAlert(id) {
@@ -1865,7 +1874,11 @@ CrimeDB.onSOS((alert, isNew) => {
       const uEl = document.getElementById('topBannerUser');
       const lEl = document.getElementById('topBannerLoc');
       if (uEl) uEl.textContent = latest.userName || 'Citizen';
-      if (lEl) lEl.textContent = '📍 ' + (latest.address ? latest.address.slice(0, 80) : (latest.city || 'Coordinates: ' + latest.lat?.toFixed(4) + ', ' + latest.lng?.toFixed(4)));
+      if (lEl) {
+        const addr = latest.address ? (latest.address.length > 90 ? latest.address.slice(0, 90) + '…' : latest.address) : (latest.city || 'Locating exact coordinates...');
+        const coordsText = latest.lat ? ` <span style="opacity:0.75;font-size:11px;">(${latest.lat.toFixed(4)}°N, ${latest.lng.toFixed(4)}°E)</span>` : '';
+        lEl.innerHTML = `📍 <b>Location:</b> ${addr}${coordsText}`;
+      }
     }
 
     // Play horn alarm if new alert OR if alarm not yet sounding

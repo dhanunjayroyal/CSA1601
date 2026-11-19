@@ -572,47 +572,108 @@ function showPage(id) {
 
 // ── Globals ───────────────────────────────────────────────
 let userMapObj = null, fullMapObj = null;
-let currentCity = 'Mumbai', userLat = 19.0760, userLng = 72.8777;
+let currentCity = 'Mumbai';
+let hasRealGPS = false;
+let userAccuracy = null;
+
+// Initialize cached GPS coordinates from previous session if available
+const cachedSavedLat = parseFloat(localStorage.getItem('cw_user_real_lat') || 0);
+const cachedSavedLng = parseFloat(localStorage.getItem('cw_user_real_lng') || 0);
+let userLat = cachedSavedLat || 19.0760;
+let userLng = cachedSavedLng || 72.8777;
+if (cachedSavedLat && cachedSavedLng) {
+  hasRealGPS = true;
+  userAccuracy = parseInt(localStorage.getItem('cw_user_real_acc') || '15', 10);
+}
 let areaChartObj = null;
 
-// ── Location Detection ────────────────────────────────────
+// ── Location Detection & Continuous GPS Sync ───────────────
+function applyGPSPosition(lat, lng, acc) {
+  userLat = lat;
+  userLng = lng;
+  userAccuracy = acc;
+  hasRealGPS = true;
+  try {
+    localStorage.setItem('cw_user_real_lat', lat);
+    localStorage.setItem('cw_user_real_lng', lng);
+    localStorage.setItem('cw_user_real_acc', acc);
+  } catch(e){}
+
+  // Find nearest supported city from database for crime statistics reference
+  let nearest = currentCity || 'Mumbai', minD = Infinity;
+  Object.entries(CrimeDB.CITY_COORDS).forEach(([c, [clat, clng]]) => {
+    const d = Math.hypot(lat - clat, lng - clng);
+    if (d < minD) { minD = d; nearest = c; }
+  });
+
+  // Load safety stats for the nearest city while strictly preserving EXACT citizen GPS coordinates
+  loadCitySafety(nearest, true);
+
+  // Reverse geocode real location name for UI header
+  fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=15&addressdetails=1`)
+    .then(r => r.json())
+    .then(data => {
+      if (data && data.address) {
+        const sub = data.address.suburb || data.address.neighbourhood || data.address.residential || data.address.road || '';
+        const cityArea = data.address.city || data.address.town || data.address.village || data.address.county || nearest;
+        const st = data.address.state || '';
+        const locTitle = [sub, cityArea, st].filter(Boolean).join(', ');
+        if (locTitle) {
+          document.getElementById('scoreCity').textContent = '📍 ' + locTitle;
+          document.getElementById('searchCity').value = locTitle;
+        }
+      }
+    })
+    .catch(()=>{
+      document.getElementById('scoreCity').textContent = `📍 ${lat.toFixed(4)}°, ${lng.toFixed(4)}° (${nearest})`;
+    });
+}
+
+function autoAcquireGPS() {
+  if (!navigator.geolocation) return;
+  // Fast query with cached position permitted (resolves in <50ms without satellite delay)
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      const acc = Math.round(pos.coords.accuracy || 10);
+      applyGPSPosition(pos.coords.latitude, pos.coords.longitude, acc);
+    },
+    err => {
+      console.warn('Fast GPS cache missed, requesting fresh satellite fix:', err.message);
+      // Fallback: request fresh fix
+      navigator.geolocation.getCurrentPosition(
+        p => applyGPSPosition(p.coords.latitude, p.coords.longitude, Math.round(p.coords.accuracy || 15)),
+        e => console.warn('Satellite GPS warning:', e.message),
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+      );
+    },
+    { enableHighAccuracy: true, timeout: 4000, maximumAge: 60000 }
+  );
+
+  // Continuous background position watch
+  try {
+    navigator.geolocation.watchPosition(
+      pos => {
+        applyGPSPosition(pos.coords.latitude, pos.coords.longitude, Math.round(pos.coords.accuracy || 10));
+      },
+      null,
+      { enableHighAccuracy: true, maximumAge: 30000 }
+    );
+  } catch(e){}
+}
+
 function getCurrentLocation() {
   if (navigator.geolocation) {
     document.getElementById('scoreCity').textContent = '📍 Acquiring Exact GPS...';
     navigator.geolocation.getCurrentPosition(
       pos => {
-        userLat = pos.coords.latitude;
-        userLng = pos.coords.longitude;
         const acc = Math.round(pos.coords.accuracy || 10);
-
-        // Find nearest city from database for crime data reference
-        let nearest = 'Mumbai', minD = Infinity;
-        Object.entries(CrimeDB.CITY_COORDS).forEach(([c, [clat, clng]]) => {
-          const d = Math.hypot(userLat - clat, userLng - clng);
-          if (d < minD) { minD = d; nearest = c; }
-        });
-
-        // Load safety stats for city while preserving EXACT user GPS coordinates
-        loadCitySafety(nearest, true);
-
-        // Reverse geocode real location name for UI header
-        fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${userLat}&lon=${userLng}&zoom=14`)
-          .then(r => r.json())
-          .then(data => {
-            const area = data.address?.suburb || data.address?.neighbourhood || data.address?.city || data.address?.town || nearest;
-            const fullArea = area + (data.address?.state ? ', ' + data.address.state : '');
-            document.getElementById('scoreCity').textContent = '📍 ' + fullArea;
-            document.getElementById('searchCity').value = fullArea;
-          })
-          .catch(()=>{
-            document.getElementById('scoreCity').textContent = `📍 ${userLat.toFixed(4)}°, ${userLng.toFixed(4)}° (${nearest})`;
-          });
+        applyGPSPosition(pos.coords.latitude, pos.coords.longitude, acc);
       },
       err => {
         console.warn('Geolocation fallback:', err.message);
         loadCitySafety(currentCity || 'Mumbai', false);
       },
-      { enableHighAccuracy: true, timeout: 9000, maximumAge: 0 }
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 10000 }
     );
   } else {
     loadCitySafety(currentCity || 'Mumbai', false);
@@ -1134,122 +1195,64 @@ async function triggerSOS() {
   document.getElementById('sosOverlay').classList.add('show');
   document.body.classList.add('sos-open');
 
-  // STEP 1: INSTANT DISPATCH TO ADMIN (< 20ms) — NEVER DELAY EMERGENCY
-  const coords = CrimeDB.CITY_COORDS[currentCity] || [19.0760, 72.8777];
-  const initialLat = userLat || coords[0];
-  const initialLng = userLng || coords[1];
-  
-  const sosRec = CrimeDB.sendSOS(currentUser.id, currentUser.name, initialLat, initialLng);
+  // STEP 1: RESOLVE BEST REAL COORDINATES (Real GPS -> Cached GPS -> Selected City)
+  let initialLat = hasRealGPS ? userLat : parseFloat(localStorage.getItem('cw_user_real_lat') || 0);
+  let initialLng = hasRealGPS ? userLng : parseFloat(localStorage.getItem('cw_user_real_lng') || 0);
+  let initialAcc = userAccuracy || parseInt(localStorage.getItem('cw_user_real_acc') || '15', 10);
+
+  // If no GPS fix is cached yet, do a 1.2s quick probe to get cached browser device coordinates
+  if (!initialLat || !initialLng) {
+    if (navigator.geolocation) {
+      try {
+        const quickPos = await new Promise(resolve => {
+          const tmr = setTimeout(() => resolve(null), 1200);
+          navigator.geolocation.getCurrentPosition(
+            p => { clearTimeout(tmr); resolve(p); },
+            () => { clearTimeout(tmr); resolve(null); },
+            { enableHighAccuracy: true, timeout: 1200, maximumAge: 60000 }
+          );
+        });
+        if (quickPos && quickPos.coords) {
+          initialLat = quickPos.coords.latitude;
+          initialLng = quickPos.coords.longitude;
+          initialAcc = Math.round(quickPos.coords.accuracy || 10);
+          userLat = initialLat;
+          userLng = initialLng;
+          hasRealGPS = true;
+          try {
+            localStorage.setItem('cw_user_real_lat', initialLat);
+            localStorage.setItem('cw_user_real_lng', initialLng);
+            localStorage.setItem('cw_user_real_acc', initialAcc);
+          } catch(e){}
+        }
+      } catch(e){}
+    }
+  }
+
+  // Fallback to current city coords only if device completely denies GPS access
+  if (!initialLat || !initialLng) {
+    const coords = CrimeDB.CITY_COORDS[currentCity] || [19.0760, 72.8777];
+    initialLat = coords[0];
+    initialLng = coords[1];
+  }
+
+  // INSTANT DISPATCH TO ADMIN & POLICE
+  const sosRec = CrimeDB.sendSOS(currentUser.id, currentUser.name, initialLat, initialLng, {
+    accuracy: initialAcc,
+    city: currentCity
+  });
   activeSOSId = sosRec.id;
 
   document.getElementById('sosLocInfo').innerHTML =
     `<div style="display:flex;align-items:center;gap:10px;">
       <div class="loader" style="width:16px;height:16px;border:2px solid #e74c3c;border-top-color:transparent;border-radius:50%;animation:spin .8s linear infinite;"></div>
-      <span>🚨 <b>Alert Dispatched to Admin!</b><br/><small style="color:var(--muted);">Locking onto 100% exact GPS satellite coordinates...</small></span>
+      <span>🚨 <b>Alert Dispatched to Admin!</b><br/><small style="color:var(--muted);">Locking onto 100% exact GPS satellite coordinates & address...</small></span>
     </div>`;
 
-  // Helper to reverse geocode and enrich address + nearby POIs
-  async function enrichLocation(lat, lng, sosId, accuracyMeters) {
-    let address = '';
-    let nearbyPlaces = [];
+  // Reverse geocode and enrich location immediately
+  enrichLocation(initialLat, initialLng, sosRec.id, initialAcc);
 
-    // Reverse geocode via Nominatim
-    try {
-      const nomCtrl = new AbortController();
-      const nomTimeout = setTimeout(() => nomCtrl.abort(), 6000);
-      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`, {
-        signal: nomCtrl.signal,
-        headers: { 'Accept': 'application/json' }
-      });
-      clearTimeout(nomTimeout);
-      if (res.ok) {
-        const nomData = await res.json();
-        if (nomData) {
-          address = nomData.display_name || '';
-          const addr = nomData.address || {};
-          if (addr.amenity) nearbyPlaces.push({ name: addr.amenity, type: 'amenity' });
-          if (addr.shop) nearbyPlaces.push({ name: addr.shop, type: 'shop' });
-          if (addr.hospital) nearbyPlaces.push({ name: addr.hospital, type: 'hospital' });
-          if (addr.police) nearbyPlaces.push({ name: addr.police, type: 'police' });
-          if (addr.building && addr.building !== 'yes') nearbyPlaces.push({ name: addr.building, type: 'building' });
-          if (addr.road) nearbyPlaces.push({ name: addr.road, type: 'road' });
-          if (addr.suburb) nearbyPlaces.push({ name: addr.suburb, type: 'suburb' });
-          if (addr.neighbourhood) nearbyPlaces.push({ name: addr.neighbourhood, type: 'neighbourhood' });
-        }
-      }
-    } catch(e){}
-
-    // Query nearby POIs via Overpass
-    try {
-      const ovCtrl = new AbortController();
-      const ovTimeout = setTimeout(() => ovCtrl.abort(), 6000);
-      const query = `[out:json][timeout:5];(
-        node(around:500,${lat},${lng})["amenity"~"hospital|police|pharmacy|clinic|bank|atm|restaurant|fuel"];
-        node(around:500,${lat},${lng})["shop"];
-      );out 12;`;
-      const ovRes = await fetch(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`, {
-        signal: ovCtrl.signal
-      });
-      clearTimeout(ovTimeout);
-      if (ovRes.ok) {
-        const ovData = await ovRes.json();
-        if (ovData && ovData.elements) {
-          ovData.elements.forEach(el => {
-            const name = el.tags?.name || el.tags?.['name:en'] || el.tags?.brand;
-            const type = el.tags?.amenity || el.tags?.shop || 'landmark';
-            if (name && !nearbyPlaces.some(p => p.name.toLowerCase() === name.toLowerCase())) {
-              nearbyPlaces.push({ name, type });
-            }
-          });
-        }
-      }
-    } catch(e){}
-
-    if (!address) {
-      address = `Lat: ${lat.toFixed(5)}, Lng: ${lng.toFixed(5)} near ${currentCity || 'City'}`;
-      nearbyPlaces.push({ name: 'Emergency Response Zone', type: 'police' });
-    }
-
-    // Update DB & Cloud with refined coordinates, address & places
-    CrimeDB.updateSOS(sosId, { lat, lng, address, nearbyPlaces, accuracy: accuracyMeters });
-
-    // Update UI on user overlay
-    const mapLink = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}&zoom=17`;
-    const gmLink  = `https://maps.google.com/?q=${lat},${lng}`;
-    const accText = accuracyMeters ? ` <span style="color:#00b894;font-size:11px;">(±${accuracyMeters}m GPS Accuracy)</span>` : '';
-
-    let placesHtml = '';
-    if (nearbyPlaces.length) {
-      const placeItems = nearbyPlaces.slice(0, 10).map(p => {
-        const icon = p.type === 'hospital' || p.type === 'clinic' ? '🏥'
-          : p.type === 'police' ? '🚓'
-          : p.type === 'shop' || p.type === 'supermarket' ? '🏪'
-          : p.type === 'fuel' ? '⛽'
-          : p.type === 'bank' || p.type === 'atm' ? '🏦'
-          : p.type === 'restaurant' || p.type === 'cafe' ? '🍽️'
-          : p.type === 'pharmacy' ? '💊'
-          : p.type === 'road' ? '🛣️' : '📍';
-        return `<span style="background:rgba(232,67,147,.18);border:1px solid rgba(232,67,147,.4);color:#ff79c6;border-radius:14px;padding:3px 9px;font-size:11px;white-space:nowrap;">${icon} ${p.name}</span>`;
-      }).join('');
-      placesHtml = `<div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,.1);">
-        <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px;">📍 NEARBY SHOPS & LANDMARKS:</div>
-        <div style="display:flex;flex-wrap:wrap;gap:5px;">${placeItems}</div>
-      </div>`;
-    }
-
-    document.getElementById('sosLocInfo').innerHTML =
-      `<div style="text-align:left;line-height:1.7;">
-        📍 <b>Coordinates:</b> ${lat.toFixed(5)}° N, ${lng.toFixed(5)}° E${accText}<br/>
-        🏠 <b>Address:</b> ${address.length > 95 ? address.slice(0,95) + '…' : address}<br/>
-        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
-          <a href="${gmLink}" target="_blank" style="font-size:11px;background:rgba(66,133,244,.2);border:1px solid rgba(66,133,244,.4);color:#74b9ff;padding:4px 10px;border-radius:8px;text-decoration:none;">📌 Open in Maps</a>
-          <a href="${mapLink}" target="_blank" style="font-size:11px;background:rgba(0,184,148,.15);border:1px solid rgba(0,184,148,.3);color:#00b894;padding:4px 10px;border-radius:8px;text-decoration:none;">🗺️ OpenStreetMap</a>
-        </div>
-        ${placesHtml}
-      </div>`;
-  }
-
-  // STEP 2: SIMULTANEOUS HIGH-ACCURACY GPS HARDWARE ACQUISITION
+  // STEP 2: SIMULTANEOUS HIGH-ACCURACY FRESH SATELLITE ACQUISITION
   if (navigator.geolocation) {
     navigator.geolocation.getCurrentPosition(
       pos => {
@@ -1258,17 +1261,120 @@ async function triggerSOS() {
         const acc = Math.round(pos.coords.accuracy || 10);
         userLat = exactLat;
         userLng = exactLng;
+        userAccuracy = acc;
+        hasRealGPS = true;
+        try {
+          localStorage.setItem('cw_user_real_lat', exactLat);
+          localStorage.setItem('cw_user_real_lng', exactLng);
+          localStorage.setItem('cw_user_real_acc', acc);
+        } catch(e){}
         enrichLocation(exactLat, exactLng, sosRec.id, acc);
       },
-      () => {
-        // Fallback to initial coords if GPS access delayed
-        enrichLocation(initialLat, initialLng, sosRec.id, null);
-      },
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+      null,
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 10000 }
     );
-  } else {
-    enrichLocation(initialLat, initialLng, sosRec.id, null);
   }
+}
+
+// Helper to reverse geocode and enrich address + nearby POIs
+async function enrichLocation(lat, lng, sosId, accuracyMeters) {
+  let address = '';
+  let nearbyPlaces = [];
+
+  // Reverse geocode via Nominatim with exact coordinates
+  try {
+    const nomCtrl = new AbortController();
+    const nomTimeout = setTimeout(() => nomCtrl.abort(), 6000);
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`, {
+      signal: nomCtrl.signal,
+      headers: { 'Accept': 'application/json' }
+    });
+    clearTimeout(nomTimeout);
+    if (res.ok) {
+      const nomData = await res.json();
+      if (nomData) {
+        address = nomData.display_name || '';
+        const addr = nomData.address || {};
+        if (addr.amenity) nearbyPlaces.push({ name: addr.amenity, type: 'amenity' });
+        if (addr.shop) nearbyPlaces.push({ name: addr.shop, type: 'shop' });
+        if (addr.hospital) nearbyPlaces.push({ name: addr.hospital, type: 'hospital' });
+        if (addr.police) nearbyPlaces.push({ name: addr.police, type: 'police' });
+        if (addr.building && addr.building !== 'yes') nearbyPlaces.push({ name: addr.building, type: 'building' });
+        if (addr.road) nearbyPlaces.push({ name: addr.road, type: 'road' });
+        if (addr.suburb) nearbyPlaces.push({ name: addr.suburb, type: 'suburb' });
+        if (addr.neighbourhood) nearbyPlaces.push({ name: addr.neighbourhood, type: 'neighbourhood' });
+      }
+    }
+  } catch(e){}
+
+  // Query nearby POIs via Overpass
+  try {
+    const ovCtrl = new AbortController();
+    const ovTimeout = setTimeout(() => ovCtrl.abort(), 6000);
+    const query = `[out:json][timeout:5];(
+      node(around:500,${lat},${lng})["amenity"~"hospital|police|pharmacy|clinic|bank|atm|restaurant|fuel"];
+      node(around:500,${lat},${lng})["shop"];
+    );out 12;`;
+    const ovRes = await fetch(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`, {
+      signal: ovCtrl.signal
+    });
+    clearTimeout(ovTimeout);
+    if (ovRes.ok) {
+      const ovData = await ovRes.json();
+      if (ovData && ovData.elements) {
+        ovData.elements.forEach(el => {
+          const name = el.tags?.name || el.tags?.['name:en'] || el.tags?.brand;
+          const type = el.tags?.amenity || el.tags?.shop || 'landmark';
+          if (name && !nearbyPlaces.some(p => p.name.toLowerCase() === name.toLowerCase())) {
+            nearbyPlaces.push({ name, type });
+          }
+        });
+      }
+    }
+  } catch(e){}
+
+  if (!address) {
+    address = `Coordinates: ${lat.toFixed(5)}° N, ${lng.toFixed(5)}° E near ${currentCity || 'Citizen Location'}`;
+    nearbyPlaces.push({ name: 'Emergency Response Zone', type: 'police' });
+  }
+
+  // Update DB & Cloud with refined coordinates, address & places
+  CrimeDB.updateSOS(sosId, { lat, lng, address, nearbyPlaces, accuracy: accuracyMeters });
+
+  // Update UI on user overlay
+  const mapLink = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}&zoom=17`;
+  const gmLink  = `https://maps.google.com/?q=${lat},${lng}`;
+  const accText = accuracyMeters ? ` <span style="color:#00b894;font-size:11px;">(±${accuracyMeters}m GPS Accuracy)</span>` : '';
+
+  let placesHtml = '';
+  if (nearbyPlaces.length) {
+    const placeItems = nearbyPlaces.slice(0, 10).map(p => {
+      const icon = p.type === 'hospital' || p.type === 'clinic' ? '🏥'
+        : p.type === 'police' ? '🚓'
+        : p.type === 'shop' || p.type === 'supermarket' ? '🏪'
+        : p.type === 'fuel' ? '⛽'
+        : p.type === 'bank' || p.type === 'atm' ? '🏦'
+        : p.type === 'restaurant' || p.type === 'cafe' ? '🍽️'
+        : p.type === 'pharmacy' ? '💊'
+        : p.type === 'road' ? '🛣️' : '📍';
+      return `<span style="background:rgba(232,67,147,.18);border:1px solid rgba(232,67,147,.4);color:#ff79c6;border-radius:14px;padding:3px 9px;font-size:11px;white-space:nowrap;">${icon} ${p.name}</span>`;
+    }).join('');
+    placesHtml = `<div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,.1);">
+      <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px;">📍 NEARBY SHOPS & LANDMARKS:</div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px;">${placeItems}</div>
+    </div>`;
+  }
+
+  document.getElementById('sosLocInfo').innerHTML =
+    `<div style="text-align:left;line-height:1.7;">
+      📍 <b>Coordinates:</b> ${lat.toFixed(5)}° N, ${lng.toFixed(5)}° E${accText}<br/>
+      🏠 <b>Address:</b> ${address.length > 95 ? address.slice(0,95) + '…' : address}<br/>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+        <a href="${gmLink}" target="_blank" style="font-size:11px;background:rgba(66,133,244,.2);border:1px solid rgba(66,133,244,.4);color:#74b9ff;padding:4px 10px;border-radius:8px;text-decoration:none;">📌 Open in Maps</a>
+        <a href="${mapLink}" target="_blank" style="font-size:11px;background:rgba(0,184,148,.15);border:1px solid rgba(0,184,148,.3);color:#00b894;padding:4px 10px;border-radius:8px;text-decoration:none;">🗺️ OpenStreetMap</a>
+      </div>
+      ${placesHtml}
+    </div>`;
 }
 
 
@@ -1598,13 +1704,20 @@ function doLogout() {
 
 // ── Startup ───────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
-  loadCitySafety('Mumbai');
+  // If we have cached real GPS, find nearest city and preserve exact coords
+  if (hasRealGPS && userLat && userLng) {
+    let nearest = 'Mumbai', minD = Infinity;
+    Object.entries(CrimeDB.CITY_COORDS).forEach(([c, [clat, clng]]) => {
+      const d = Math.hypot(userLat - clat, userLng - clng);
+      if (d < minD) { minD = d; nearest = c; }
+    });
+    loadCitySafety(nearest, true);
+  } else {
+    loadCitySafety('Mumbai', false);
+  }
   updateCollectorBadge();
+  autoAcquireGPS();
 });
-setTimeout(() => {
-  loadCitySafety('Mumbai');
-  updateCollectorBadge();
-}, 200);
 </script>
 </body>
 </html>
