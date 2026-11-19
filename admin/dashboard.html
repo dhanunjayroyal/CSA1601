@@ -189,6 +189,45 @@ tr:last-child td{border-bottom:none;}
 
 .empty{text-align:center;padding:50px 20px;color:var(--muted);}
 .empty .ei{font-size:44px;margin-bottom:10px;}
+
+/* ══ Animated Styling & Polished UI ══ */
+@keyframes glowPulseRed { 0%,100%{box-shadow:0 0 15px rgba(231,76,60,.3)} 50%{box-shadow:0 0 35px rgba(231,76,60,.65)} }
+@keyframes badgePop { 0%{transform:scale(.92)} 50%{transform:scale(1.05)} 100%{transform:scale(1)} }
+.tc, .sc, .uc {
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(255,255,255,.07) !important;
+  transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease;
+}
+.tc:hover, .sc:hover, .uc:hover {
+  border-color: rgba(124,131,245,.35) !important;
+  box-shadow: 0 8px 25px rgba(0,0,0,.35);
+}
+.sos-card {
+  border-radius: 12px;
+  transition: all .25s ease;
+}
+.sos-card:not(.resolved) {
+  animation: glowPulseRed 1.8s infinite alternate;
+  border: 1px solid rgba(231,76,60,.5) !important;
+}
+.sos-tab-btn {
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid rgba(255,255,255,.1);
+  background: rgba(255,255,255,.05);
+  color: var(--muted);
+  transition: all .2s;
+}
+.sos-tab-btn.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  box-shadow: 0 4px 14px rgba(232,67,147,.35);
+}
+
 </style>
 </head>
 <body>
@@ -1071,405 +1110,120 @@ function updateSOSBadge(active) {
 }
 
 function renderSOS() {
-  const sos = CrimeDB.getSOSAlerts();
-  const active = sos.filter(s => s.status === 'active').length;
-  updateSOSBadge(active);
+  const allSos = CrimeDB.getSOSAlerts();
+  const activeAlerts = allSos.filter(s => s.status === 'active');
+  const resolvedAlerts = allSos.filter(s => s.status === 'resolved');
+  const cancelledAlerts = allSos.filter(s => s.status === 'cancelled');
+  const historyAlerts = allSos.filter(s => s.status === 'resolved' || s.status === 'cancelled');
+
+  const activeCount = activeAlerts.length;
+  updateSOSBadge(activeCount);
+
+  // Tab counters
+  const cAct = document.getElementById('countActiveTab');
+  const cHist = document.getElementById('countHistoryTab');
+  if (cAct) cAct.textContent = activeCount;
+  if (cHist) cHist.textContent = historyAlerts.length;
 
   document.getElementById('sosStats').innerHTML = `
-    <div class="sc"><div class="sic" style="background:rgba(198,40,40,.14)">🆘</div>
-      <div><div class="sv" style="color:#e74c3c">${active}</div><div class="sl">Active Alerts</div></div></div>
-    <div class="sc"><div class="sic" style="background:rgba(39,174,96,.14)">✅</div>
-      <div><div class="sv" style="color:#27ae60">${sos.filter(s=>s.status==='resolved').length}</div><div class="sl">Resolved</div></div></div>
-    <div class="sc"><div class="sic" style="background:rgba(249,168,37,.14)">📋</div>
-      <div><div class="sv" style="color:#f9a825">${sos.length}</div><div class="sl">Total</div></div></div>`;
+    <div class="sc"><div class="sic" style="background:rgba(231,76,60,.14)">🆘</div>
+      <div><div class="sv" style="color:#e74c3c">${activeCount}</div><div class="sl">Active Alerts</div></div></div>
+    <div class="sc"><div class="sic" style="background:rgba(0,184,148,.14)">✅</div>
+      <div><div class="sv" style="color:#00b894">${resolvedAlerts.length}</div><div class="sl">Solved Cases</div></div></div>
+    <div class="sc"><div class="sic" style="background:rgba(243,156,18,.14)">⚠️</div>
+      <div><div class="sv" style="color:#f39c12">${cancelledAlerts.length}</div><div class="sl">Accidental / Mistake</div></div></div>
+    <div class="sc"><div class="sic" style="background:rgba(124,131,245,.14)">📋</div>
+      <div><div class="sv" style="color:#7c83f5">${allSos.length}</div><div class="sl">Total Handled</div></div></div>`;
 
-  if (!sos.length) {
-    document.getElementById('sosList').innerHTML = '<div class="empty"><div class="ei">✅</div><p>No SOS alerts received</p></div>';
+  // Filter based on currentSosFilter
+  let displayList = allSos;
+  if (currentSosFilter === 'active') {
+    displayList = activeAlerts;
+  } else if (currentSosFilter === 'history') {
+    displayList = historyAlerts;
+  }
+
+  if (!displayList.length) {
+    let emptyMsg = 'No active SOS alerts at this time. All citizen requests are safe.';
+    if (currentSosFilter === 'history') emptyMsg = 'No previous resolved or cancelled cases in history yet.';
+    else if (currentSosFilter === 'all') emptyMsg = 'No SOS alerts received yet.';
+
+    document.getElementById('sosList').innerHTML = `<div class="empty">
+      <div class="ei">${currentSosFilter === 'active' ? '🛡️' : '📁'}</div>
+      <p style="font-weight:600;font-size:14px;color:#fff;">${emptyMsg}</p>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px;">Real-time cloud monitoring active via GitHub Gist relay.</div>
+    </div>`;
     return;
   }
 
-  document.getElementById('sosList').innerHTML = sos.map(s => {
+  document.getElementById('sosList').innerHTML = displayList.map(s => {
+    const isSolved = s.status === 'resolved';
+    const isCancelled = s.status === 'cancelled';
+    const isActive = s.status === 'active';
+
+    const statusBadge = isSolved ? '<span style="background:rgba(0,184,148,.2);color:#00b894;border:1px solid #00b894;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:800;">✅ SOLVED / CLOSED</span>'
+      : isCancelled ? '<span style="background:rgba(243,156,18,.2);color:#f39c12;border:1px solid #f39c12;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:800;">⚠️ ACCIDENTAL CLICK (MISTAKE)</span>'
+      : '<span style="background:rgba(231,76,60,.25);color:#ff7675;border:1px solid #e74c3c;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:800;animation:badgePop .8s infinite alternate;">🚨 ACTIVE EMERGENCY</span>';
+
     const police = getPoliceForLocation(s.lat, s.lng, s.city);
-    // Build nearby places section if available
+    
+    // Nearby places
     let nearbyHtml = '';
     if (s.nearbyPlaces && s.nearbyPlaces.length) {
       nearbyHtml = `<div style="background:rgba(124,131,245,.08);border:1px solid rgba(124,131,245,.2);border-radius:10px;padding:10px;margin-top:10px;">
-        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-bottom:7px;">📍 Nearby Places (from SOS location)</div>
+        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-bottom:7px;">📍 Nearby Places & Shops (From Citizen GPS)</div>
         <div style="display:flex;flex-wrap:wrap;gap:6px;">
           ${s.nearbyPlaces.slice(0,10).map(p=>`<span style="background:rgba(124,131,245,.15);border:1px solid rgba(124,131,245,.25);color:#9ba4fc;border-radius:20px;padding:3px 10px;font-size:11px;">
-            ${p.type === 'hospital' ? '🏥' : p.type === 'school' || p.type === 'college' ? '🏫' : p.type === 'restaurant' || p.type === 'cafe' ? '🍽️' : p.type === 'bank' || p.type === 'atm' ? '🏦' : p.type === 'pharmacy' ? '💊' : p.type === 'fuel' ? '⛽' : p.type === 'police' ? '🚓' : p.type === 'hotel' ? '🏨' : p.type === 'supermarket' || p.type === 'convenience' ? '🛒' : '📌'} ${p.name}
+            ${p.type === 'hospital' ? '🏥' : p.type === 'shop' ? '🏪' : p.type === 'police' ? '🚓' : p.type === 'pharmacy' ? '💊' : p.type === 'fuel' ? '⛽' : p.type === 'bank' ? '🏦' : '📌'} ${p.name}
           </span>`).join('')}
         </div>
       </div>`;
     }
-    let addressHtml = '';
-    if (s.address && s.address !== 'Unknown address') {
-      addressHtml = `<div style="font-size:11px;color:var(--muted);margin-top:5px;">🏠 ${s.address.length > 100 ? s.address.slice(0,100)+'…' : s.address}</div>`;
-    }
-    return `<div class="sos-card ${s.status==='resolved'?'resolved':''}">
-      <div class="sos-ic">${s.status==='resolved'?'✅':'🆘'}</div>
-      <div class="sos-info">
-        <div class="sos-name">${s.userName}</div>
-        <div class="sos-meta">
-          📅 ${new Date(s.timestamp).toLocaleString()}<br/>
-          📍 Coordinates: Lat ${(s.lat||0).toFixed(5)}, Lng ${(s.lng||0).toFixed(5)}<br/>
-          🏙️ City: ${s.city || 'Unknown'}
-        </div>
-        ${addressHtml}
-        ${nearbyHtml}
-        <div class="police-box" style="margin-top:10px;">
-          <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-bottom:5px;">🚓 Nearest Police Station</div>
-          <div style="font-size:13px;font-weight:600;">${police.name}</div>
-          <div class="ph" style="margin-top:4px;">📞 ${police.num}</div>
-          <div style="display:flex;gap:8px;margin-top:8px;">
-            <a href="tel:${police.num.replace(/[^0-9]/g,'')}" style="padding:5px 12px;background:rgba(26,35,126,.2);border:1px solid rgba(26,35,126,.4);color:#7c83f5;border-radius:7px;font-size:11px;font-weight:600;text-decoration:none;">📞 Call Station</a>
-            <a href="tel:100" style="padding:5px 12px;background:rgba(198,40,40,.15);border:1px solid rgba(198,40,40,.35);color:#ff6b6b;border-radius:7px;font-size:11px;font-weight:600;text-decoration:none;">🚨 Call 100</a>
+
+    const mapLink = `https://www.openstreetmap.org/?mlat=${s.lat}&mlon=${s.lng}&zoom=17`;
+    const gmLink  = `https://maps.google.com/?q=${s.lat},${s.lng}`;
+    const accText = s.accuracy ? ` <span style="color:#00b894;font-size:11px;font-weight:700;">(±${s.accuracy}m GPS Accuracy)</span>` : '';
+
+    return `<div class="sos-card ${isSolved?'resolved':''}" style="margin-bottom:14px;background:rgba(26,26,38,.85);border:1px solid ${isActive?'rgba(231,76,60,.5)':'rgba(255,255,255,.08)'};padding:16px;border-radius:14px;">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:10px;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div class="sos-ic" style="font-size:26px;width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:${isActive?'rgba(231,76,60,.2)':'rgba(0,184,148,.15)'}">${isActive?'🆘':'📁'}</div>
+          <div>
+            <div style="font-size:16px;font-weight:800;color:#fff;">${s.userName || 'Citizen'}</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px;">📅 Triggered: ${new Date(s.timestamp).toLocaleString()}</div>
           </div>
         </div>
+        <div>${statusBadge}</div>
       </div>
-      <div class="sos-actions">
-        <span class="pill ${s.status==='active'?'p-r':'p-g'}">${s.status.toUpperCase()}</span>
-        ${s.status==='active'?`<button class="btn btn-s" onclick="resolveAlert('${s.id}')">✅ Resolve</button>`:''}
+
+      <div style="background:rgba(0,0,0,.25);padding:10px 12px;border-radius:8px;font-size:12px;line-height:1.7;margin-bottom:10px;">
+        📍 <b>Exact Coordinates:</b> ${(s.lat||0).toFixed(5)}° N, ${(s.lng||0).toFixed(5)}° E${accText}<br/>
+        🏠 <b>Street Address:</b> ${s.address || 'Locating street address...'}<br/>
+        🏙️ <b>City Area:</b> ${s.city || 'Unknown'}
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+          <a href="${gmLink}" target="_blank" style="padding:4px 10px;background:rgba(66,133,244,.18);border:1px solid rgba(66,133,244,.4);color:#74b9ff;border-radius:6px;font-size:11px;font-weight:700;text-decoration:none;">📌 Open in Google Maps</a>
+          <a href="${mapLink}" target="_blank" style="padding:4px 10px;background:rgba(0,184,148,.15);border:1px solid rgba(0,184,148,.3);color:#00b894;border-radius:6px;font-size:11px;font-weight:700;text-decoration:none;">🗺️ OpenStreetMap</a>
+        </div>
+      </div>
+
+      ${nearbyHtml}
+
+      <div class="police-box" style="margin-top:10px;background:rgba(26,35,126,.15);border:1px solid rgba(26,35,126,.3);padding:10px 12px;border-radius:8px;">
+        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-bottom:4px;">🚓 Nearest Police Station</div>
+        <div style="font-size:13px;font-weight:700;color:#fff;">${police.name}</div>
+        <div style="font-size:11px;color:#7c83f5;margin-top:2px;">📞 Contact: ${police.num}</div>
+      </div>
+
+      ${s.cancelReason ? `<div style="margin-top:10px;padding:8px 10px;background:rgba(243,156,18,.12);border:1px solid rgba(243,156,18,.3);border-radius:8px;font-size:11px;color:#f39c12;">
+        <b>⚠️ Cancellation Note:</b> ${s.cancelReason}
+      </div>` : ''}
+
+      <div style="display:flex;gap:10px;margin-top:14px;justify-content:flex-end;align-items:center;">
+        ${isActive ? `<button class="btn btn-p" onclick="resolveAlert('${s.id}')" style="background:linear-gradient(135deg,#00b894,#00cec9);border:none;padding:8px 18px;font-weight:800;font-size:12px;box-shadow:0 4px 12px rgba(0,184,148,.3);">✅ Mark as SOLVED & Archive</button>` : `<span style="font-size:11px;color:var(--muted);">Resolved on ${s.resolvedAt ? new Date(s.resolvedAt).toLocaleString() : 'Done'}</span>`}
       </div>
     </div>`;
   }).join('');
 }
-
-function getPoliceForLocation(lat, lng, city) {
-  // Try direct city match first
-  if (city && POLICE_NUMBERS[city]) return POLICE_NUMBERS[city];
-  // Find nearest city by coordinates
-  if (lat && lng) {
-    let nearest = null, minD = Infinity;
-    Object.entries(CrimeDB.CITY_COORDS).forEach(([c, [clat, clng]]) => {
-      const d = Math.hypot(lat - clat, lng - clng);
-      if (d < minD) { minD = d; nearest = c; }
-    });
-    if (nearest && POLICE_NUMBERS[nearest]) return POLICE_NUMBERS[nearest];
-  }
-  return { name: 'National Emergency', num: '100', emergency: '100' };
-}
-
-function resolveAlert(id) {
-  CrimeDB.resolveSOSAlert(id);
-  renderSOS();
-}
-
-// ════════════════════════════════════════════════════════
-// ── ANALYTICS ──────────────────────────────────────────
-// ════════════════════════════════════════════════════════
-function initAnalytics() {
-  const data = CrimeDB.getCrimeData();
-  const wc = {}; data.forEach(d => { wc[d.weapon||'None'] = (wc[d.weapon||'None']||0) + 1; });
-  new Chart(document.getElementById('wpnChart'), { type:'bar', data:{ labels:Object.keys(wc), datasets:[{ data:Object.values(wc), backgroundColor:PAL, borderRadius:5, borderSkipped:false }] }, options:{ plugins:{legend:{display:false}}, scales:{x:{ticks:{color:'#8b949e',font:{size:10}}},y:{ticks:{color:'#8b949e'}}}, responsive:true } });
-
-  const closed = data.filter(d => d.caseClosed === 'Yes').length;
-  new Chart(document.getElementById('closChart'), { type:'pie', data:{ labels:['Closed','Open'], datasets:[{ data:[closed,data.length-closed], backgroundColor:['#27ae60','#e74c3c'], borderWidth:2, borderColor:'#21262d' }] }, options:{ plugins:{ legend:{ position:'bottom', labels:{color:'#8b949e'} } }, responsive:true } });
-
-  const ag = {'<18':0,'18–30':0,'31–45':0,'46–60':0,'60+':0};
-  data.forEach(d => { const a=d.victimAge; if(!a)return; if(a<18)ag['<18']++; else if(a<=30)ag['18–30']++; else if(a<=45)ag['31–45']++; else if(a<=60)ag['46–60']++; else ag['60+']+= 1; });
-  new Chart(document.getElementById('ageChart'), { type:'bar', data:{ labels:Object.keys(ag), datasets:[{ data:Object.values(ag), backgroundColor:'#7c83f5', borderRadius:5, borderSkipped:false }] }, options:{ plugins:{legend:{display:false}}, scales:{x:{ticks:{color:'#8b949e'}},y:{ticks:{color:'#8b949e'}}}, responsive:true } });
-
-  const dc = {}; data.forEach(d => { dc[d.domain]=(dc[d.domain]||0)+1; });
-  new Chart(document.getElementById('domChart'), { type:'doughnut', data:{ labels:Object.keys(dc), datasets:[{ data:Object.values(dc), backgroundColor:PAL, borderWidth:2, borderColor:'#21262d' }] }, options:{ plugins:{ legend:{ position:'bottom', labels:{color:'#8b949e'} } }, responsive:true } });
-}
-
-// ════════════════════════════════════════════════════════
-// ── CRIME RECORDS TABLE ─────────────────────────────────
-// ════════════════════════════════════════════════════════
-let cPage = 0;
-const PS   = 50;
-
-function renderCrimesPage() { cPage = 0; _renderCrimePage(); }
-
-function _renderCrimePage() {
-  const search = document.getElementById('cSearch').value.toLowerCase();
-  const cf     = document.getElementById('cFCity').value;
-  const tf     = document.getElementById('cFType').value;
-  const data   = CrimeDB.getCrimeData().filter(d => {
-    if (cf && d.city !== cf) return false;
-    if (tf && d.crimeType !== tf) return false;
-    if (search && !JSON.stringify(d).toLowerCase().includes(search)) return false;
-    return true;
-  });
-  const total = data.length;
-  const page  = data.slice(cPage * PS, (cPage + 1) * PS);
-  const dc = { 'Violent Crime':'p-r','Fire Accident':'p-o','Traffic Fatality':'p-b','Other Crime':'p-gr' };
-
-  document.getElementById('crimesBody').innerHTML = page.map((d, i) => `
-    <tr>
-      <td>${cPage * PS + i + 1}</td>
-      <td>${d.dateOccurrence || '—'}</td>
-      <td><b>${d.city}</b></td>
-      <td>${d.crimeType}</td>
-      <td><span class="pill ${dc[d.domain]||'p-gr'}">${d.domain}</span></td>
-      <td>${d.weapon || '—'}</td>
-      <td>${d.victimAge || '?'}${d.victimGender ? '/' + d.victimGender : ''}</td>
-      <td><span class="pill ${d.caseClosed==='Yes'?'p-g':'p-o'}">${d.caseClosed==='Yes'?'Closed':'Open'}</span></td>
-      <td style="white-space:nowrap;">
-        <button class="btn btn-p" onclick="showDetail('${d.id}')">👁️</button>
-        <button class="btn btn-d" onclick="delCrime('${d.id}')">🗑️</button>
-      </td>
-    </tr>`).join('') || '<tr><td colspan="9" style="text-align:center;padding:28px;color:var(--muted);">No records found</td></tr>';
-
-  const pages = Math.ceil(total / PS);
-  let pg = `<span class="pi">${Math.min(cPage*PS+1,total)}–${Math.min((cPage+1)*PS,total)} of ${total.toLocaleString()}</span>`;
-  if (cPage > 0) pg += `<button class="pb" onclick="cPage--;_renderCrimePage()">‹ Prev</button>`;
-  for (let i = Math.max(0, cPage-2); i <= Math.min(pages-1, cPage+2); i++)
-    pg += `<button class="pb ${i===cPage?'active':''}" onclick="cPage=${i};_renderCrimePage()">${i+1}</button>`;
-  if (cPage < pages - 1) pg += `<button class="pb" onclick="cPage++;_renderCrimePage()">Next ›</button>`;
-  document.getElementById('crimesPag').innerHTML = pg;
-}
-
-function showDetail(id) {
-  const d = CrimeDB.getCrimeData().find(c => String(c.id) === String(id));
-  if (!d) return;
-  document.getElementById('detContent').innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;font-size:13px;">
-      ${[['Crime Type',`<b style="color:#7c83f5">${d.crimeType}</b>`],['City',d.city],
-        ['Date',d.dateOccurrence||'—'],['Time',d.timeOccurrence||'—'],
-        ['Domain',d.domain],['Weapon',d.weapon||'None'],
-        ['Victim Age',d.victimAge||'—'],['Victim Gender',d.victimGender==='M'?'👨 Male':'👩 Female'],
-        ['Police Deployed',d.policeDeployed||'—'],['Status',d.caseClosed==='Yes'?'✅ Closed':'⏳ Open']]
-       .map(([k,v])=>`<div>
-         <div style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">${k}</div>
-         <div style="font-weight:600;">${v}</div>
-       </div>`).join('')}
-    </div>`;
-  document.getElementById('detModal').classList.add('show');
-}
-
-function delCrime(id) {
-  if (!confirm('Delete this crime record?')) return;
-  CrimeDB.deleteCrime(id);
-  _renderCrimePage();
-}
-
-// ════════════════════════════════════════════════════════
-// ── UPLOAD CRIME ────────────────────────────────────────
-// ════════════════════════════════════════════════════════
-function submitCrime() {
-  const ct   = document.getElementById('u_ct').value;
-  const city = document.getElementById('u_city').value;
-  const date = document.getElementById('u_date').value;
-  const msg  = document.getElementById('upMsg');
-  if (!ct || !city || !date) {
-    msg.style.background = 'rgba(198,40,40,.1)'; msg.style.color = '#ff6b6b';
-    msg.textContent = '⚠️ Crime type, city and date are required.'; msg.style.display = 'block'; return;
-  }
-  CrimeDB.addCrime({
-    crimeType: ct, city, dateOccurrence: date,
-    timeOccurrence: document.getElementById('u_time').value,
-    domain: document.getElementById('u_dom').value,
-    weapon: document.getElementById('u_wpn').value,
-    victimAge: +document.getElementById('u_age').value || null,
-    victimGender: document.getElementById('u_gen').value,
-    policeDeployed: +document.getElementById('u_pol').value || 0,
-    caseClosed: document.getElementById('u_cls').value,
-    description: (document.getElementById('u_desc')?.value || '').trim(),
-    dateReported: new Date().toISOString().slice(0, 10)
-  });
-  msg.style.background = 'rgba(39,174,96,.1)'; msg.style.color = '#27ae60';
-  msg.textContent = '✅ Crime record added successfully!'; msg.style.display = 'block';
-  setTimeout(() => { msg.style.display = 'none'; }, 3000);
-}
-
-// ════════════════════════════════════════════════════════
-// ── USERS ───────────────────────────────────────────────
-// ════════════════════════════════════════════════════════
-
-// ── Bulk Crime Upload Engine ──────────────────────────────
-let parsedBulkCrimes = [];
-
-function downloadCsvTemplate() {
-  const headers = 'crimeType,city,dateOccurrence,timeOccurrence,domain,weapon,victimAge,victimGender,policeDeployed,caseClosed,description\n';
-  const sample1 = 'ROBBERY,Mumbai,2024-06-15,14:30,Violent Crime,Knife,32,M,2,No,Near railway station market\n';
-  const sample2 = 'BURGLARY,Delhi,2024-06-16,02:15,Other Crime,None,45,F,1,Yes,Commercial shop lock broken\n';
-  const sample3 = 'CYBERCRIME,Bangalore,2024-06-17,11:00,Other Crime,None,29,M,0,No,Online banking phishing scam\n';
-  const blob = new Blob([headers + sample1 + sample2 + sample3], { type: 'text/csv;charset=utf-8;' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.setAttribute('download', 'crime_records_template.csv');
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-}
-
-function handleBulkFileSelect(e) {
-  const file = e.target.files?.[0];
-  if (!file) return;
-  const fileName = file.name.toLowerCase();
-
-  if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
-    const reader = new FileReader();
-    reader.onload = function(evt) {
-      try {
-        if (typeof XLSX === 'undefined') {
-          showBulkMsg('⚠️ SheetJS library loading. Please try again in a few seconds or use CSV format.', false);
-          return;
-        }
-        const data = new Uint8Array(evt.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[firstSheetName];
-        const jsonRows = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
-        processParsedRows(jsonRows);
-      } catch(err) {
-        showBulkMsg('❌ Failed to parse Excel file: ' + err.message, false);
-      }
-    };
-    reader.readAsArrayBuffer(file);
-  } else {
-    // Treat as CSV / Text
-    const reader = new FileReader();
-    reader.onload = function(evt) {
-      parseCsvString(evt.target.result);
-    };
-    reader.readAsText(file);
-  }
-}
-
-function parsePastedCsv() {
-  const text = (document.getElementById('bulkCsvPaste')?.value || '').trim();
-  if (!text) {
-    showBulkMsg('⚠️ Please paste CSV text first.', false);
-    return;
-  }
-  parseCsvString(text);
-}
-
-function parseCsvString(str) {
-  const lines = str.split(/\r?\n/).filter(l => l.trim().length > 0);
-  if (lines.length < 2) {
-    showBulkMsg('⚠️ CSV must have at least a header row and one data row.', false);
-    return;
-  }
-  const delim = lines[0].includes('\t') ? '\t' : lines[0].includes(';') ? ';' : ',';
-  const rawHeaders = lines[0].split(delim).map(h => h.trim().replace(/^["']|["']$/g, ''));
-  const rows = [];
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-    const cells = [];
-    let inQuote = false, cur = '';
-    for (let c = 0; c < line.length; c++) {
-      const ch = line[c];
-      if (ch === '"') { inQuote = !inQuote; }
-      else if (ch === delim && !inQuote) { cells.push(cur.trim()); cur = ''; }
-      else { cur += ch; }
-    }
-    cells.push(cur.trim());
-
-    const rowObj = {};
-    rawHeaders.forEach((hdr, idx) => {
-      rowObj[hdr] = cells[idx] ? cells[idx].replace(/^["']|["']$/g, '') : '';
-    });
-    rows.push(rowObj);
-  }
-  processParsedRows(rows);
-}
-
-function processParsedRows(rows) {
-  if (!rows || !rows.length) {
-    showBulkMsg('⚠️ No records found in file.', false);
-    return;
-  }
-  const valid = [];
-  rows.forEach(r => {
-    const getKey = (...names) => {
-      for (const n of names) {
-        for (const k of Object.keys(r)) {
-          if (k.toLowerCase().replace(/[^a-z0-9]/g, '') === n.toLowerCase().replace(/[^a-z0-9]/g, '')) {
-            return r[k];
-          }
-        }
-      }
-      return '';
-    };
-
-    const crimeType = (getKey('crimeType', 'type', 'crime', 'offense') || '').toUpperCase().trim();
-    const city = getKey('city', 'location', 'place') || '';
-    let date = getKey('dateOccurrence', 'date', 'occurredDate', 'dateReported') || '';
-    if (!date) date = new Date().toISOString().slice(0, 10);
-    if (typeof date === 'number') {
-      const d = new Date((date - 25569) * 86400 * 1000);
-      date = d.toISOString().slice(0, 10);
-    }
-
-    if (crimeType && city) {
-      valid.push({
-        crimeType,
-        city,
-        dateOccurrence: String(date),
-        timeOccurrence: String(getKey('timeOccurrence', 'time') || '12:00'),
-        domain: getKey('domain', 'category') || 'Violent Crime',
-        weapon: getKey('weapon', 'weaponUsed') || 'None',
-        victimAge: +getKey('victimAge', 'age') || null,
-        victimGender: getKey('victimGender', 'gender') || 'M',
-        policeDeployed: +getKey('policeDeployed', 'police') || 0,
-        caseClosed: String(getKey('caseClosed', 'closed', 'status')).toLowerCase().startsWith('y') ? 'Yes' : 'No',
-        description: getKey('description', 'notes', 'details', 'signal') || ''
-      });
-    }
-  });
-
-  parsedBulkCrimes = valid;
-  if (!valid.length) {
-    showBulkMsg('❌ No valid records found. Make sure columns include "crimeType" and "city".', false);
-    document.getElementById('bulkPreviewBox').style.display = 'none';
-    return;
-  }
-
-  document.getElementById('bulkPreviewBox').style.display = 'block';
-  document.getElementById('bulkPreviewCount').textContent = `✅ ${valid.length} valid records ready to import`;
-  const tbody = document.getElementById('bulkPreviewBody');
-  tbody.innerHTML = valid.slice(0, 8).map(r => `
-    <tr style="border-bottom:1px solid var(--border);">
-      <td style="padding:6px 8px;"><b style="color:var(--accent);">${r.crimeType}</b></td>
-      <td style="padding:6px 8px;">${r.city}</td>
-      <td style="padding:6px 8px;">${r.dateOccurrence}</td>
-      <td style="padding:6px 8px;">${r.domain}</td>
-      <td style="padding:6px 8px;">${r.weapon}</td>
-    </tr>
-  `).join('');
-  if (valid.length > 8) {
-    tbody.innerHTML += `<tr><td colspan="5" style="padding:6px 8px;color:var(--muted);text-align:center;">… and ${valid.length - 8} more records</td></tr>`;
-  }
-  showBulkMsg(`📊 Parsed ${valid.length} records. Review preview above and click "Import All Records Now".`, true);
-}
-
-function confirmBulkImport() {
-  if (!parsedBulkCrimes.length) return;
-  const btn = document.getElementById('btnConfirmBulk');
-  btn.disabled = true;
-  btn.textContent = '⏳ Importing...';
-
-  setTimeout(() => {
-    const count = CrimeDB.addCrimesBulk(parsedBulkCrimes);
-    showBulkMsg(`🎉 Success! ${count} crime records imported into database. City crime rates & maps updated!`, true);
-    parsedBulkCrimes = [];
-    document.getElementById('bulkPreviewBox').style.display = 'none';
-    btn.disabled = false;
-    btn.textContent = '📥 Import All Records Now';
-    try {
-      renderCrimesPage();
-      renderStats();
-    } catch(e){}
-  }, 100);
-}
-
-function showBulkMsg(msg, isOk) {
-  const el = document.getElementById('bulkMsg');
-  if (!el) return;
-  el.style.display = 'block';
-  el.style.background = isOk ? 'rgba(39,174,96,.15)' : 'rgba(198,40,40,.15)';
-  el.style.color = isOk ? '#27ae60' : '#ff6b6b';
-  el.style.border = isOk ? '1px solid rgba(39,174,96,.3)' : '1px solid rgba(198,40,40,.3)';
-  el.textContent = msg;
-}
-
-// ── SOS Enricher (Admin Fallback) ──────────────────────────
-const enrichedSOSIds = new Set();
 function enrichSOSIfMissing(s) {
   if (!s || !s.id || enrichedSOSIds.has(s.id)) return;
   if ((!s.address || s.address === 'Unknown address' || !s.nearbyPlaces || !s.nearbyPlaces.length) && s.lat && s.lng) {
@@ -1512,7 +1266,10 @@ function renderUsers() {
       </div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:5px;">📱 ${u.phone || 'N/A'}</div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">🗓️ Joined: ${u.createdAt?.slice(0,10) || 'N/A'}</div>
-      <span class="pill ${u.mustChange?'p-o':'p-g'}">${u.mustChange?'⚠️ Default PW':'✅ Active'}</span>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px;">
+        <span class="pill ${u.mustChange?'p-o':'p-g'}">${u.mustChange?'⚠️ Default PW':'✅ Active'}</span>
+        <button onclick="deleteUserPrompt('${u.id}', '${u.name}', '${u.email}')" style="background:rgba(231,76,60,.14);border:1px solid rgba(231,76,60,.35);color:#ff7675;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;transition:all .2s;" title="Remove User Account">🗑️ Remove</button>
+      </div>
     </div>`).join('')}</div>`;
 }
 

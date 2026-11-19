@@ -484,6 +484,23 @@ const CrimeDB = (() => {
     try { sessionStorage.removeItem('cw_sess_' + t); } catch(e){}
   }
 
+  function deleteUser(id) {
+    let u = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+    const target = u.find(x => x.id === id);
+    if (!target) return false;
+    u = u.filter(x => x.id !== id);
+    localStorage.setItem(USERS_KEY, JSON.stringify(u));
+    if (typeof cachedCloudUsers !== 'undefined') {
+      cachedCloudUsers = cachedCloudUsers.filter(x => x.id !== id && x.email !== target.email);
+    }
+    if (typeof knownUserEmails !== 'undefined') {
+      knownUserEmails.delete(target.email);
+    }
+    broadcastLocal('USER_DELETE', { id, email: target.email });
+    syncUsersToCloud();
+    return true;
+  }
+
   function updateUser(id, updates){
     const u = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
     const i = u.findIndex(x => x.id === id);
@@ -507,7 +524,7 @@ const CrimeDB = (() => {
     CITY_COORDS,
     getCrimeData, addCrime, addCrimesBulk, deleteCrime,
     loginAdmin, loginUser, registerUser,
-    changeUserPassword, changeAdminPassword, updateUser,
+    changeUserPassword, changeAdminPassword, updateUser, deleteUser,
     getAllUsers, getAllAdmins,
     sendSOS, updateSOS, getSOSAlerts, resolveSOSAlert,
     getEmergencyContacts, saveEmergencyContacts,

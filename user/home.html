@@ -185,6 +185,41 @@ body.sos-open{overflow:hidden !important;}
   background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:#fff;
   border-radius:10px;padding:12px 24px;font-size:13px;font-weight:700;cursor:pointer;margin-top:10px;
 }
+
+/* ══ Animated Styling & Anti-Overlap ══ */
+@keyframes glowPulse { 0%,100%{box-shadow:0 0 15px rgba(232,67,147,.25)} 50%{box-shadow:0 0 30px rgba(232,67,147,.55)} }
+@keyframes cardFloat { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-3px)} }
+@keyframes pulseRing { 0%{transform:scale(.95);opacity:.9} 50%{transform:scale(1.08);opacity:.4} 100%{transform:scale(.95);opacity:.9} }
+.page { padding-bottom: 120px !important; animation: fadeIn .3s cubic-bezier(.4,0,.2,1); }
+@keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+.stat-card, .chart-card, .quick-action, .local-crimes-container {
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,.08) !important;
+  transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease;
+}
+.stat-card:hover, .quick-action:hover {
+  transform: translateY(-2px);
+  border-color: rgba(232,67,147,.4) !important;
+  box-shadow: 0 8px 24px rgba(0,0,0,.35);
+}
+.sos-btn-wrap.pressing #sosBtn {
+  animation: glowPulse .8s infinite alternate !important;
+}
+.local-crime-item {
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 10px;
+  padding: 10px 12px;
+  transition: all .2s ease;
+  cursor: pointer;
+}
+.local-crime-item:hover {
+  background: rgba(232,67,147,.08);
+  border-color: rgba(232,67,147,.3);
+  transform: translateX(3px);
+}
+#userMap { min-height: 320px; border-radius: 14px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,.4); }
+
 </style>
 </head>
 <body>
@@ -233,8 +268,24 @@ body.sos-open{overflow:hidden !important;}
       <div class="mini-stat"><div class="val" id="st_open" style="color:var(--teal)">—</div><div class="lbl">Open Cases</div></div>
     </div>
 
-    <div class="section-title">🗺️ Crime Map (5km Radius)</div>
+    <div class="section-title" style="margin-top:20px;">🗺️ Crime Map (5km Radius)</div>
     <div id="userMap"></div>
+
+    <!-- ══ 5KM LOCAL CRIMES REPORT (Directly at bottom of map) ══ -->
+    <div class="local-crimes-container" id="localCrimesContainer" style="margin-top:16px;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+        <div>
+          <div style="font-size:14px;font-weight:800;color:#fff;display:flex;align-items:center;gap:6px;">
+            <span>📍</span> Crimes Within 5 km of Your Location
+          </div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px;" id="local5kmSubtitle">Scanning 5km radius...</div>
+        </div>
+        <span id="local5kmCountBadge" style="background:rgba(232,67,147,.18);border:1px solid rgba(232,67,147,.4);color:#ff79c6;padding:3px 12px;border-radius:12px;font-size:11px;font-weight:800;">0 Incidents</span>
+      </div>
+      <div id="local5kmList" style="display:flex;flex-direction:column;gap:8px;max-height:340px;overflow-y:auto;padding-right:4px;">
+        <div style="text-align:center;padding:20px;color:var(--muted);font-size:12px;">Loading crimes in this 5km area...</div>
+      </div>
+    </div>
 
     <div class="chart-card">
       <div class="chart-title">📊 Crime Types in This Area</div>
@@ -527,25 +578,44 @@ let areaChartObj = null;
 // ── Location Detection ────────────────────────────────────
 function getCurrentLocation() {
   if (navigator.geolocation) {
-    document.getElementById('scoreCity').textContent = '📍 Detecting GPS...';
+    document.getElementById('scoreCity').textContent = '📍 Acquiring Exact GPS...';
     navigator.geolocation.getCurrentPosition(
       pos => {
         userLat = pos.coords.latitude;
         userLng = pos.coords.longitude;
+        const acc = Math.round(pos.coords.accuracy || 10);
+
+        // Find nearest city from database for crime data reference
         let nearest = 'Mumbai', minD = Infinity;
         Object.entries(CrimeDB.CITY_COORDS).forEach(([c, [clat, clng]]) => {
           const d = Math.hypot(userLat - clat, userLng - clng);
           if (d < minD) { minD = d; nearest = c; }
         });
-        loadCitySafety(nearest);
+
+        // Load safety stats for city while preserving EXACT user GPS coordinates
+        loadCitySafety(nearest, true);
+
+        // Reverse geocode real location name for UI header
+        fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${userLat}&lon=${userLng}&zoom=14`)
+          .then(r => r.json())
+          .then(data => {
+            const area = data.address?.suburb || data.address?.neighbourhood || data.address?.city || data.address?.town || nearest;
+            const fullArea = area + (data.address?.state ? ', ' + data.address.state : '');
+            document.getElementById('scoreCity').textContent = '📍 ' + fullArea;
+            document.getElementById('searchCity').value = fullArea;
+          })
+          .catch(()=>{
+            document.getElementById('scoreCity').textContent = `📍 ${userLat.toFixed(4)}°, ${userLng.toFixed(4)}° (${nearest})`;
+          });
       },
-      () => {
-        loadCitySafety(currentCity || 'Mumbai');
+      err => {
+        console.warn('Geolocation fallback:', err.message);
+        loadCitySafety(currentCity || 'Mumbai', false);
       },
-      { timeout: 7000 }
+      { enableHighAccuracy: true, timeout: 9000, maximumAge: 0 }
     );
   } else {
-    loadCitySafety(currentCity || 'Mumbai');
+    loadCitySafety(currentCity || 'Mumbai', false);
   }
 }
 
@@ -555,10 +625,13 @@ function onCityType(val) {
 }
 
 // ── Load City Safety ──────────────────────────────────────
-function loadCitySafety(city) {
+function loadCitySafety(city, preserveExactCoords) {
   currentCity = city;
   const coords = CrimeDB.CITY_COORDS[city] || [19.0760, 72.8777];
-  userLat = coords[0]; userLng = coords[1];
+  if (!preserveExactCoords) {
+    userLat = coords[0];
+    userLng = coords[1];
+  }
 
   const allData = CrimeDB.getCrimeData();
   const cityData = allData.filter(d => d.city === city);
@@ -1185,6 +1258,40 @@ async function triggerSOS() {
   } else {
     enrichLocation(initialLat, initialLng, sosRec.id, null);
   }
+}
+
+
+// Distance calculation helper (Haversine formula in km)
+function getDistanceKm(lat1, lon1, lat2, lon2) {
+  if (!lat1 || !lon1 || !lat2 || !lon2) return 9999;
+  const R = 6371; // Earth radius in km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return Math.round((R * c) * 10) / 10;
+}
+
+function cancelSOSAsMistake() {
+  stopEmergencySiren();
+  if (activeSOSId) {
+    try {
+      CrimeDB.updateSOS(activeSOSId, {
+        status: 'cancelled',
+        cancelReason: 'Accidental Click / Triggered by Mistake by Citizen',
+        resolvedAt: new Date().toISOString()
+      });
+    } catch(e){}
+    activeSOSId = null;
+  }
+  document.getElementById('sosOverlay').classList.remove('show');
+  document.body.classList.remove('sos-open');
+  sosActive = false;
+  sosProgress = 0;
+  if (sosCircle) sosCircle.style.strokeDashoffset = CIRCUM;
+  showToast('⚠️ SOS Alert Cancelled (Marked as Accidental Click)');
 }
 
 function dismissSOS() {
