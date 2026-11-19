@@ -297,9 +297,12 @@ tr:last-child td{border-bottom:none;}
     </div>
   </div>
 
-  <div id="audioUnlockBanner" onclick="testOrUnlockSound()" style="display:none;position:fixed;top:68px;right:22px;z-index:999;background:rgba(232,67,147,.18);border:1px solid var(--accent);color:#fff;border-radius:10px;padding:10px 16px;font-size:12px;font-weight:600;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.5);align-items:center;gap:8px;">
-    <span>🔔</span>
-    <span>Browser muted audio. <u>Tap here to enable emergency siren</u>!</span>
+  <div id="audioUnlockBanner" style="display:none;position:fixed;top:68px;right:22px;z-index:999;background:rgba(232,67,147,.18);border:1px solid var(--accent);color:#fff;border-radius:10px;padding:8px 14px;font-size:12px;font-weight:600;box-shadow:0 6px 20px rgba(0,0,0,.5);align-items:center;gap:10px;">
+    <div onclick="testOrUnlockSound()" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+      <span>🔔</span>
+      <span>Browser muted audio. <u>Tap here to enable emergency siren</u>!</span>
+    </div>
+    <button onclick="dismissSoundBanner()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:12px;line-height:1;" title="Dismiss">✕</button>
   </div>
 
   <div class="content">
@@ -1541,7 +1544,11 @@ function playSOSAlarm() {
   }, 600);
 }
 
+let userPrefersMuted = false;
+
 function stopAdminAlarm() {
+  userPrefersMuted = true;
+  hideSoundUnlockBanner();
   stopWebAudioHorn();
   clearInterval(titleFlashTimer);
   document.title = 'CrimeWatch – Admin Dashboard';
@@ -1556,6 +1563,7 @@ function stopAdminAlarm() {
 
 function unlockAudio() {
   soundUnlocked = true;
+  userPrefersMuted = false;
   try {
     const ACls = window.AudioContext || window.webkitAudioContext;
     if (ACls && (!audioCtx || audioCtx.state === 'closed')) audioCtx = new ACls();
@@ -1578,10 +1586,12 @@ function unlockAudio() {
 }
 
 function testOrUnlockSound() {
+  hideSoundUnlockBanner();
   if (adminSirenPlaying) {
     stopAdminAlarm();
     return;
   }
+  userPrefersMuted = false;
   unlockAudio();
   playSOSAlarm();
   // Brief 2.5 second audio test if manually triggered
@@ -1599,12 +1609,17 @@ function testOrUnlockSound() {
 const toggleAdminSound = testOrUnlockSound;
 
 function showSoundUnlockBanner() {
+  if (userPrefersMuted) return;
   const b = document.getElementById('audioUnlockBanner');
   if (b) b.style.display = 'flex';
 }
 function hideSoundUnlockBanner() {
   const b = document.getElementById('audioUnlockBanner');
   if (b) b.style.display = 'none';
+}
+function dismissSoundBanner() {
+  userPrefersMuted = true;
+  hideSoundUnlockBanner();
 }
 
 function showSOSAlarm() {
