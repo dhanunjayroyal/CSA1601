@@ -1368,48 +1368,94 @@ function startWebAudioHorn() {
   try {
     const ACls = window.AudioContext || window.webkitAudioContext;
     if (!ACls) return;
-    if (!audioCtx) audioCtx = new ACls();
-    if (audioCtx.state === 'suspended') {
-      audioCtx.resume().catch(()=>{});
+    if (!audioCtx || audioCtx.state === 'closed') audioCtx = new ACls();
+
+    function triggerHorn() {
+      try {
+        stopWebAudioHorn();
+        adminOsc = audioCtx.createOscillator();
+        adminLfo = audioCtx.createOscillator();
+        adminLfoGain = audioCtx.createGain();
+        adminMasterGain = audioCtx.createGain();
+
+        adminOsc.type = 'sawtooth';
+        adminOsc.frequency.setValueAtTime(880, audioCtx.currentTime);
+
+        // 1.4 Hz alternating horn sweep (emergency horn)
+        adminLfo.type = 'triangle';
+        adminLfo.frequency.setValueAtTime(1.4, audioCtx.currentTime);
+
+        adminLfoGain.gain.setValueAtTime(280, audioCtx.currentTime); // 600Hz to 1160Hz sweep
+        adminLfo.connect(adminLfoGain);
+        adminLfoGain.connect(adminOsc.frequency);
+
+        adminMasterGain.gain.setValueAtTime(0.85, audioCtx.currentTime);
+        adminOsc.connect(adminMasterGain);
+        adminMasterGain.connect(audioCtx.destination);
+
+        adminLfo.start();
+        adminOsc.start();
+        adminSirenPlaying = true;
+        updateSoundUI();
+      } catch(e){}
     }
 
-    stopWebAudioHorn();
-
-    adminOsc = audioCtx.createOscillator();
-    adminLfo = audioCtx.createOscillator();
-    adminLfoGain = audioCtx.createGain();
-    adminMasterGain = audioCtx.createGain();
-
-    adminOsc.type = 'sawtooth';
-    adminOsc.frequency.setValueAtTime(880, audioCtx.currentTime);
-
-    // 1.4 Hz alternating horn sweep (high/low European & Indian emergency horn)
-    adminLfo.type = 'triangle';
-    adminLfo.frequency.setValueAtTime(1.4, audioCtx.currentTime);
-
-    adminLfoGain.gain.setValueAtTime(280, audioCtx.currentTime); // 600Hz to 1160Hz sweep
-    adminLfo.connect(adminLfoGain);
-    adminLfoGain.connect(adminOsc.frequency);
-
-    adminMasterGain.gain.setValueAtTime(0.8, audioCtx.currentTime);
-    adminOsc.connect(adminMasterGain);
-    adminMasterGain.connect(audioCtx.destination);
-
-    adminLfo.start();
-    adminOsc.start();
-    adminSirenPlaying = true;
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume().then(triggerHorn).catch(() => {
+        showSoundUnlockBanner();
+      });
+    } else {
+      triggerHorn();
+    }
   } catch(e){}
 }
 
 function stopWebAudioHorn() {
   try {
-    if (adminOsc) { adminOsc.stop(); adminOsc.disconnect(); adminOsc = null; }
-    if (adminLfo) { adminLfo.stop(); adminLfo.disconnect(); adminLfo = null; }
+    if (adminOsc) {
+      try { adminOsc.stop(); } catch(e){}
+      try { adminOsc.disconnect(); } catch(e){}
+      adminOsc = null;
+    }
+    if (adminLfo) {
+      try { adminLfo.stop(); } catch(e){}
+      try { adminLfo.disconnect(); } catch(e){}
+      adminLfo = null;
+    }
     adminSirenPlaying = false;
+    updateSoundUI();
   } catch(e){}
 }
 
-// 3. Master Emergency Alarm Controller
+// 3. UI and Audio Status Controller
+function updateSoundUI() {
+  const btn = document.getElementById('btnSound');
+  const icon = document.getElementById('soundIcon');
+  const status = document.getElementById('soundStatus');
+  if (!btn || !icon || !status) return;
+
+  if (adminSirenPlaying) {
+    icon.textContent = '🚨';
+    status.textContent = 'Siren Blaring (Tap to Silence)';
+    btn.style.background = 'rgba(231,76,60,0.2)';
+    btn.style.borderColor = 'rgba(231,76,60,0.6)';
+    btn.style.color = '#ff6b6b';
+  } else if (!soundUnlocked && audioCtx && audioCtx.state === 'suspended') {
+    icon.textContent = '🔇';
+    status.textContent = 'Sound Muted (Tap to Enable)';
+    btn.style.background = 'rgba(232,67,147,0.15)';
+    btn.style.borderColor = 'rgba(232,67,147,0.45)';
+    btn.style.color = '#fd79a8';
+  } else {
+    icon.textContent = '🔊';
+    status.textContent = 'Sound: Active (Tap to Test)';
+    btn.style.background = 'rgba(39,174,96,0.12)';
+    btn.style.borderColor = 'rgba(39,174,96,0.35)';
+    btn.style.color = '#27ae60';
+  }
+}
+
+// 4. Master Emergency Alarm Controller
 function playSOSAlarm() {
   soundUnlocked = true;
   updateSoundUI();
@@ -1458,31 +1504,45 @@ function unlockAudio() {
   soundUnlocked = true;
   try {
     const ACls = window.AudioContext || window.webkitAudioContext;
-    if (ACls && !audioCtx) audioCtx = new ACls();
+    if (ACls && (!audioCtx || audioCtx.state === 'closed')) audioCtx = new ACls();
     if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(()=>{});
     const a = getSirenAudio();
     if (a) {
       a.muted = true;
-      a.play().then(() => {
-        a.pause();
-        a.currentTime = 0;
-        a.muted = false;
-      }).catch(()=>{ a.muted = false; });
+      const p = a.play();
+      if (p && typeof p.then === 'function') {
+        p.then(() => {
+          a.pause();
+          a.currentTime = 0;
+          a.muted = false;
+        }).catch(()=>{ a.muted = false; });
+      }
     }
   } catch(e){}
   updateSoundUI();
   hideSoundUnlockBanner();
 }
 
-function toggleAdminSound() {
+function testOrUnlockSound() {
   if (adminSirenPlaying) {
     stopAdminAlarm();
     return;
   }
   unlockAudio();
   playSOSAlarm();
-  setTimeout(() => { stopAdminAlarm(); }, 2000);
+  // Brief 2.5 second audio test if manually triggered
+  setTimeout(() => {
+    try {
+      const activeSos = CrimeDB.getSOSAlerts().filter(s => s && s.status === 'active');
+      if (activeSos.length === 0) {
+        stopAdminAlarm();
+      }
+    } catch(e){
+      stopAdminAlarm();
+    }
+  }, 2500);
 }
+const toggleAdminSound = testOrUnlockSound;
 
 function showSoundUnlockBanner() {
   const b = document.getElementById('audioUnlockBanner');
@@ -1495,14 +1555,16 @@ function hideSoundUnlockBanner() {
 
 function showSOSAlarm() {
   const el = document.getElementById('sosAlarm');
-  el.style.display = 'block';
-  setTimeout(() => { el.style.display = 'none'; }, 7000);
+  if (el) {
+    el.style.display = 'block';
+    setTimeout(() => { el.style.display = 'none'; }, 7000);
+  }
 }
 
 function checkNewSOS() {
   const sos = CrimeDB.getSOSAlerts();
   const activeAlerts = sos.filter(s => s.status === 'active');
-  const unnotified = activeAlerts.find(s => s && s.id && !notifiedSOSIds.has(s.id));
+  const unnotified = activeAlerts.find(s => s && s.id && !desktopNotifiedIds.has(s.id));
   if (unnotified) {
     handleSOSNotification(unnotified, true);
   } else {
@@ -1871,11 +1933,11 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-// Unified SOS Notification Deduplication (Guarantees exactly ONE notification per SOS click)
-const notifiedSOSIds = new Set();
+// Unified SOS Notification Deduplication (Guarantees exactly ONE desktop popup per SOS click)
+const desktopNotifiedIds = new Set();
 try {
   CrimeDB.getSOSAlerts().filter(s => s && s.status === 'active').forEach(s => {
-    if (s && s.id) notifiedSOSIds.add(s.id);
+    if (s && s.id) desktopNotifiedIds.add(s.id);
   });
 } catch(e){}
 
@@ -1902,20 +1964,22 @@ function handleSOSNotification(alert, isExplicitNew) {
       }
     }
 
-    // Check if this specific alert has ALREADY triggered its initial notification
     const targetAlert = (alert && alert.id) ? alert : latest;
-    const isAlreadyNotified = targetAlert && targetAlert.id && notifiedSOSIds.has(targetAlert.id);
 
-    // ONLY notify and play alarm ONCE per unique SOS incident ID
-    if (!isAlreadyNotified && (isExplicitNew || (targetAlert && targetAlert.id))) {
-      if (targetAlert && targetAlert.id) notifiedSOSIds.add(targetAlert.id);
-
+    // Siren alarm: ALWAYS trigger emergency siren on explicit new SOS or if not currently sounding
+    if (isExplicitNew || !adminSirenPlaying) {
       playSOSAlarm();
       showSOSAlarm();
-      document.getElementById('sosPill')?.classList.add('ringing');
-      setTimeout(() => document.getElementById('sosPill')?.classList.remove('ringing'), 6000);
+      const pill = document.getElementById('sosPill');
+      if (pill) {
+        pill.classList.add('ringing');
+        setTimeout(() => pill.classList.remove('ringing'), 6000);
+      }
+    }
 
-      // Native Desktop Notification (deduplicated with unique tag)
+    // Native Desktop Notification (deduplicated: exactly ONE notification popup per incident)
+    if (targetAlert && targetAlert.id && !desktopNotifiedIds.has(targetAlert.id)) {
+      desktopNotifiedIds.add(targetAlert.id);
       try {
         if ('Notification' in window) {
           if (Notification.permission === 'granted') {
