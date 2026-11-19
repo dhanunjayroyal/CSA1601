@@ -732,10 +732,15 @@ function initUserMap(city, data) {
   const colors = { 'Violent Crime': '#e74c3c', 'Fire Accident': '#f39c12', 'Traffic Fatality': '#9b59b6', 'Other Crime': '#3498db' };
   data.forEach(d => {
     if (!d.lat || !d.lng) return;
+    const col = colors[d.domain] || '#3498db';
     L.circleMarker([d.lat, d.lng], {
-      radius: 4, fillColor: colors[d.domain] || '#95a5a6', color: '#fff', weight: 1, fillOpacity: 0.8
-    }).bindPopup(`<b>${d.crimeType}</b><br/>📅 ${d.dateOccurrence || '—'}<br/>🔫 ${d.weapon || 'None'}`)
-      .addTo(userMapObj);
+      radius: 7, fillColor: col, color: '#ffffff', weight: 1.5, fillOpacity: 0.9
+    }).bindPopup(`<div style="font-family:sans-serif;min-width:160px;line-height:1.5;">
+      <span style="background:${col};color:#fff;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:800;">${d.domain}</span>
+      <div style="font-size:13px;font-weight:800;color:#111;margin-top:4px;">${d.crimeType}</div>
+      <div>📅 ${d.dateOccurrence || '—'} | 🔫 ${d.weapon || 'None'}</div>
+      <div style="color:${d.caseClosed==='Yes'?'#27ae60':'#f39c12'};font-weight:700;font-size:11px;margin-top:2px;">${d.caseClosed==='Yes'?'✅ Solved':'⏳ Open Case'}</div>
+    </div>`).addTo(userMapObj);
   });
 
   // User Location Pin
@@ -771,9 +776,15 @@ function renderFullMap() {
   const colors = { 'Violent Crime': '#e74c3c', 'Fire Accident': '#f39c12', 'Traffic Fatality': '#9b59b6', 'Other Crime': '#3498db' };
   data.forEach(d => {
     if (!d.lat || !d.lng) return;
+    const col = colors[d.domain] || '#3498db';
     L.circleMarker([d.lat, d.lng], {
-      radius: 4, fillColor: colors[d.domain] || '#95a5a6', color: '#fff', weight: 1, fillOpacity: 0.75
-    }).bindPopup(`<b>${d.crimeType}</b><br/>📍 ${d.city}<br/>📅 ${d.dateOccurrence || '—'}`)
+      radius: 7, fillColor: col, color: '#ffffff', weight: 1.5, fillOpacity: 0.9
+    }).bindPopup(`<div style="font-family:sans-serif;min-width:160px;line-height:1.5;">
+      <span style="background:${col};color:#fff;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:800;">${d.domain}</span>
+      <div style="font-size:13px;font-weight:800;color:#111;margin-top:4px;">${d.crimeType}</div>
+      <div>📍 ${d.city} | 📅 ${d.dateOccurrence || '—'}</div>
+      <div style="color:${d.caseClosed==='Yes'?'#27ae60':'#f39c12'};font-weight:700;font-size:11px;margin-top:2px;">${d.caseClosed==='Yes'?'✅ Solved':'⏳ Open Case'}</div>
+    </div>`)
       .addTo(fullMapObj);
   });
 }

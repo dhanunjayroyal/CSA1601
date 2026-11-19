@@ -116,7 +116,35 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--dark);color:va
   </div>
 </div>
 
-<script src="../shared/crime-data-inline.js"></script>
+<script src="../shared/crime-data-inline.js">
+let suspendedUserEmail = '';
+
+function showSuspendedNotice(user, reason) {
+  suspendedUserEmail = user.email || '';
+  document.getElementById('suspEmailTxt').textContent = 'Account: ' + suspendedUserEmail;
+  document.getElementById('suspReasonTxt').textContent = reason || 'Suspended by Administrator';
+  document.getElementById('reqForm').style.display = 'block';
+  document.getElementById('reqSuccess').style.display = 'none';
+  const modal = document.getElementById('reactivateModal');
+  modal.style.display = 'flex';
+}
+
+function closeReactivationModal() {
+  document.getElementById('reactivateModal').style.display = 'none';
+}
+
+function submitReactivation() {
+  const msg = document.getElementById('reactivateMsg').value.trim();
+  if (!msg) {
+    alert('Please enter a brief explanation for the administrator.');
+    return;
+  }
+  CrimeDB.requestReactivation(suspendedUserEmail, msg);
+  document.getElementById('reqForm').style.display = 'none';
+  document.getElementById('reqSuccess').style.display = 'block';
+}
+
+</script>
 <script src="../shared/db.js"></script>
 <script>
 let pendingUser=null;
@@ -157,6 +185,10 @@ function doLogin(){
   if(!em||!pw){err.textContent='⚠️ Please fill in all fields.';err.style.display='block';return;}
   const u=CrimeDB.loginUser(em,pw);
   if(!u){err.textContent='⚠️ Invalid email or password.';err.style.display='block';return;}
+  if(u.error === 'ACCOUNT_REMOVED') {
+    showSuspendedNotice(u.user, u.reason);
+    return;
+  }
   
   if (rem) {
     try { localStorage.setItem('cw_saved_user', JSON.stringify({ email: em, password: pw })); } catch(e){}
@@ -235,5 +267,45 @@ document.addEventListener('keydown', e => {
   }
 });
 </script>
+
+<!-- ══ ACCOUNT SUSPENDED & REACTIVATION REQUEST MODAL ══ -->
+<div class="overlay" id="reactivateModal" style="display:none;position:fixed;inset:0;background:rgba(10,10,15,.88);backdrop-filter:blur(8px);z-index:9999;align-items:center;justify-content:center;padding:20px;">
+  <div style="background:var(--card);border:1px solid #e74c3c;border-radius:16px;max-width:440px;width:100%;padding:24px;box-shadow:0 10px 40px rgba(231,76,60,.35);animation:fadeIn .25s ease;">
+    <div style="text-align:center;margin-bottom:16px;">
+      <div style="width:56px;height:56px;border-radius:50%;background:rgba(231,76,60,.18);border:2px solid #e74c3c;margin:0 auto 12px;display:flex;align-items:center;justify-content:center;font-size:26px;">🚫</div>
+      <h3 style="color:#fff;font-size:18px;font-weight:800;">Account Suspended</h3>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px;" id="suspEmailTxt">Your account is currently disabled.</div>
+    </div>
+
+    <div style="background:rgba(231,76,60,.1);border:1px solid rgba(231,76,60,.3);border-radius:10px;padding:12px;margin-bottom:16px;">
+      <div style="font-size:11px;font-weight:700;color:#ff7675;text-transform:uppercase;letter-spacing:.6px;">Reason from Administrator:</div>
+      <div style="font-size:13px;color:#fff;margin-top:4px;font-weight:600;" id="suspReasonTxt">—</div>
+    </div>
+
+    <div id="reqForm">
+      <div style="font-size:12px;color:#d0d0e0;margin-bottom:8px;line-height:1.5;">
+        If you believe this was an error, you can submit a direct re-activation request to the Admin team:
+      </div>
+      <div style="margin-bottom:14px;">
+        <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px;">Explanation / Appeal Message</label>
+        <textarea id="reactivateMsg" placeholder="Please explain why your account should be restored..." style="width:100%;height:80px;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:#fff;padding:10px;font-size:12px;font-family:inherit;resize:none;"></textarea>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button onclick="submitReactivation()" style="flex:1;background:linear-gradient(135deg,#00b894,#00cec9);border:none;color:#fff;padding:11px;border-radius:8px;font-weight:800;font-size:13px;cursor:pointer;">📨 Send Request to Admin</button>
+        <button onclick="closeReactivationModal()" style="background:rgba(255,255,255,.08);border:1px solid var(--border);color:var(--muted);padding:11px 16px;border-radius:8px;font-size:12px;cursor:pointer;">Cancel</button>
+      </div>
+    </div>
+
+    <div id="reqSuccess" style="display:none;text-align:center;padding:12px 0;">
+      <div style="font-size:28px;margin-bottom:8px;">✅</div>
+      <div style="font-size:14px;font-weight:700;color:#00b894;">Request Sent Successfully!</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:6px;line-height:1.5;">
+        The Administrator has received your appeal. Once reviewed and approved, you will be able to log in with your email and password.
+      </div>
+      <button onclick="closeReactivationModal()" style="margin-top:16px;width:100%;background:rgba(255,255,255,.1);border:1px solid var(--border);color:#fff;padding:10px;border-radius:8px;cursor:pointer;font-weight:700;">Close</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>

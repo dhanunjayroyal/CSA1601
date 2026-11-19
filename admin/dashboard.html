@@ -15,7 +15,9 @@
 body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--dark);color:var(--text);display:flex;min-height:100vh;}
 
 /*── Sidebar ──*/
-.sidebar{width:var(--sw);background:var(--surface);border-right:1px solid var(--border);
+.sidebar{width:var(--sw);background:var(--surface);border-right:1px solid var(--border);scrollbar-width:none;-ms-overflow-style:none;}
+.sidebar::-webkit-scrollbar{display:none;}
+.sidebar{
   display:flex;flex-direction:column;position:fixed;top:0;left:0;height:100vh;z-index:200;overflow-y:auto;}
 .sb-logo{padding:16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;}
 .sb-icon{width:38px;height:38px;background:linear-gradient(135deg,var(--primary),var(--accent));
@@ -537,6 +539,102 @@ tr:last-child td{border-bottom:none;}
 <script src="../shared/crime-data-inline.js"></script>
 <script src="../shared/db.js"></script>
 <script>
+
+// ── Critical Global State & Declarations ──
+const enrichedSOSIds = new Set();
+let userMgmtTab = 'active'; // 'active', 'suspended', 'requests'
+let userPendingRemoveId = null;
+let userPendingRemoveName = '';
+
+function getPoliceForLocation(lat, lng, city) {
+  const policeStations = {
+    'Mumbai': { name: 'Mumbai Police HQ & Azad Maidan Police Station', num: '022-22620111' },
+    'Delhi': { name: 'Delhi Police PCR / Connaught Place Station', num: '011-23469200' },
+    'Bangalore': { name: 'Bangalore City Police / Infantry Road HQ', num: '080-22942222' },
+    'Hyderabad': { name: 'Hyderabad Police Commissionerate / Basheerbagh', num: '040-27852435' },
+    'Chennai': { name: 'Greater Chennai Police HQ / Vepery', num: '044-23452359' },
+    'Kolkata': { name: 'Kolkata Police HQ / Lalbazar', num: '033-22143000' },
+    'Pune': { name: 'Pune City Police Control Room', num: '020-26122880' },
+    'Ahmedabad': { name: 'Ahmedabad Police Commissioner Office', num: '079-25630100' },
+    'Jaipur': { name: 'Jaipur Police Commissionerate', num: '0141-2601201' },
+    'Lucknow': { name: 'Lucknow Police Control Room', num: '0522-2239011' }
+  };
+  if (city && policeStations[city]) return policeStations[city];
+  return { name: (city || 'City') + ' Central Police Control Room', num: '112 / 100' };
+}
+
+// ── User Management Functions ──
+function switchUserTab(tab) {
+  userMgmtTab = tab;
+  ['active', 'suspended', 'requests'].forEach(t => {
+    const btn = document.getElementById('ut-' + t);
+    if (btn) btn.classList.toggle('active', t === tab);
+  });
+  renderUsers();
+}
+
+function promptRemoveUserWithReason(id, name, email) {
+  userPendingRemoveId = id;
+  userPendingRemoveName = name;
+  document.getElementById('remUserSub').textContent = `User: ${name} (${email})`;
+  document.getElementById('remReasonPreset').value = 'Policy violation / Abuse of emergency SOS system';
+  document.getElementById('remReasonDetails').value = 'Policy violation / Abuse of emergency SOS system';
+  const modal = document.getElementById('removeUserModal');
+  modal.style.display = 'flex';
+}
+
+function onPresetChange() {
+  const p = document.getElementById('remReasonPreset').value;
+  if (p !== 'custom') {
+    document.getElementById('remReasonDetails').value = p;
+  }
+}
+
+function closeRemoveUserModal() {
+  document.getElementById('removeUserModal').style.display = 'none';
+  userPendingRemoveId = null;
+}
+
+function confirmRemoveUser() {
+  if (!userPendingRemoveId) return;
+  const reason = document.getElementById('remReasonDetails').value.trim() || 'Account suspended by Administrator';
+  CrimeDB.removeUser(userPendingRemoveId, reason);
+  closeRemoveUserModal();
+  renderUsers();
+  alert(`User "${userPendingRemoveName}" has been suspended/removed. Reason has been dispatched to their login portal.`);
+}
+
+function restoreUserAccount(id, name) {
+  if (confirm(`Re-activate and restore account for "${name}"?\n\nThe citizen will immediately be able to log in again.`)) {
+    CrimeDB.restoreUser(id);
+    renderUsers();
+    alert(`User "${name}" has been restored successfully!`);
+  }
+}
+
+function approveReactivation(email) {
+  const allUsers = CrimeDB.getAllUsers();
+  const target = allUsers.find(u => u.email === email);
+  if (target) {
+    CrimeDB.restoreUser(target.id);
+  } else {
+    // If not found in memory, mark request approved
+    let reqs = CrimeDB.getReactivationRequests();
+    reqs.forEach(r => { if (r.email === email) r.status = 'approved'; });
+    localStorage.setItem('cw_reactivation_requests', JSON.stringify(reqs));
+  }
+  renderUsers();
+  alert(`Reactivation approved for ${email}! User can now sign in.`);
+}
+
+function dismissRequest(id) {
+  if (confirm('Dismiss this reactivation request?')) {
+    CrimeDB.dismissReactivationRequest(id);
+    renderUsers();
+  }
+}
+
+
 'use strict';
 
 // ── Auth guard ─────────────────────────────────────────────
@@ -833,55 +931,209 @@ function showCityOverview() {
 // ════════════════════════════════════════════════════════
 // ── ADMIN MAP (FIXED) ───────────────────────────────────
 // ════════════════════════════════════════════════════════
-let aMap = null, aLayer = null;
 
+// ── Crime Records Page Rendering ──
+let crimesCurrentPage = 1;
+const crimesPerPage = 30;
+
+function renderCrimesPage() {
+  const tbody = document.getElementById('crimesBody');
+  if (!tbody) return;
+
+  const data = CrimeDB.getCrimeData();
+  const searchVal = (document.getElementById('crimeSearch')?.value || '').toLowerCase();
+  const cityVal = document.getElementById('crimeCityFilter')?.value || '';
+  const typeVal = document.getElementById('crimeTypeFilter')?.value || '';
+
+  const filtered = data.filter(d => {
+    if (cityVal && d.city !== cityVal) return false;
+    if (typeVal && d.crimeType !== typeVal) return false;
+    if (searchVal) {
+      const match = (d.crimeType||'').toLowerCase().includes(searchVal) ||
+                    (d.city||'').toLowerCase().includes(searchVal) ||
+                    (d.weapon||'').toLowerCase().includes(searchVal) ||
+                    (d.domain||'').toLowerCase().includes(searchVal);
+      if (!match) return false;
+    }
+    return true;
+  });
+
+  const total = filtered.length;
+  const totalPages = Math.ceil(total / crimesPerPage) || 1;
+  if (crimesCurrentPage > totalPages) crimesCurrentPage = 1;
+
+  const start = (crimesCurrentPage - 1) * crimesPerPage;
+  const pageItems = filtered.slice(start, start + crimesPerPage);
+
+  if (!pageItems.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--muted);">No matching crime records found</td></tr>';
+    return;
+  }
+
+  const domainColors = {
+    'Violent Crime': '#e74c3c',
+    'Fire Accident': '#f39c12',
+    'Traffic Fatality': '#9b59b6',
+    'Other Crime': '#3498db'
+  };
+
+  tbody.innerHTML = pageItems.map((c, i) => {
+    const isClosed = c.caseClosed === 'Yes';
+    const domColor = domainColors[c.domain] || '#95a5a6';
+    return `<tr>
+      <td style="color:var(--muted);font-size:11px;">#${start + i + 1}</td>
+      <td style="white-space:nowrap;font-size:12px;">${c.dateOccurrence || 'N/A'}</td>
+      <td><b>${c.city}</b></td>
+      <td><span style="font-weight:700;color:#fff;">${c.crimeType}</span></td>
+      <td><span style="background:${domColor}22;border:1px solid ${domColor}55;color:${domColor};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;">${c.domain}</span></td>
+      <td style="color:var(--muted);font-size:12px;">${c.weapon || 'None'}</td>
+      <td style="font-size:12px;">${c.victimAge ? c.victimAge + ' (' + (c.victimGender||'-') + ')' : '-'}</td>
+      <td><span style="color:${isClosed?'#27ae60':'#f39c12'};font-weight:700;font-size:11px;">${isClosed?'✅ Closed':'⏳ Open'}</span></td>
+      <td><button onclick="deleteCrimeRecord('${c.id}')" style="background:rgba(231,76,60,.15);border:1px solid rgba(231,76,60,.3);color:#ff7675;padding:3px 8px;border-radius:6px;font-size:11px;cursor:pointer;">🗑️</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function deleteCrimeRecord(id) {
+  if (confirm('Delete this crime incident record?')) {
+    CrimeDB.deleteCrime(id);
+    renderCrimesPage();
+  }
+}
+
+// ── Analytics Page Rendering ──
+function initAnalytics() {
+  const data = CrimeDB.getCrimeData();
+  const PAL = ['#e84393', '#7c83f5', '#00b894', '#f39c12', '#e74c3c', '#9b59b6', '#3498db', '#1abc9c'];
+
+  // 1. Weapon Usage Chart
+  const wc = {};
+  data.forEach(d => { const w = d.weapon || 'None'; wc[w] = (wc[w] || 0) + 1; });
+  const sortedWpn = Object.entries(wc).sort((a,b)=>b[1]-a[1]).slice(0, 8);
+  const wpnEl = document.getElementById('wpnChart');
+  if (wpnEl) {
+    new Chart(wpnEl, {
+      type: 'bar',
+      data: {
+        labels: sortedWpn.map(x=>x[0]),
+        datasets: [{ data: sortedWpn.map(x=>x[1]), backgroundColor: PAL, borderRadius: 6 }]
+      },
+      options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#8b949e', font: { size: 10 } } }, y: { ticks: { color: '#8b949e' } } } }
+    });
+  }
+
+  // 2. Case Closure Rate Doughnut
+  const closedCount = data.filter(d => d.caseClosed === 'Yes').length;
+  const openCount = data.length - closedCount;
+  const closEl = document.getElementById('closChart');
+  if (closEl) {
+    new Chart(closEl, {
+      type: 'doughnut',
+      data: {
+        labels: ['Solved & Closed', 'Under Investigation (Open)'],
+        datasets: [{ data: [closedCount, openCount], backgroundColor: ['#00b894', '#e74c3c'], borderWidth: 0 }]
+      },
+      options: { responsive: true, plugins: { legend: { labels: { color: '#e6edf3' } } } }
+    });
+  }
+
+  // 3. Victim Age Groups
+  const ageBuckets = { '< 18': 0, '18-30': 0, '31-45': 0, '46-60': 0, '60+': 0 };
+  data.forEach(d => {
+    const a = d.victimAge;
+    if (a < 18) ageBuckets['< 18']++;
+    else if (a <= 30) ageBuckets['18-30']++;
+    else if (a <= 45) ageBuckets['31-45']++;
+    else if (a <= 60) ageBuckets['46-60']++;
+    else if (a > 60) ageBuckets['60+']++;
+  });
+  const ageEl = document.getElementById('ageChart');
+  if (ageEl) {
+    new Chart(ageEl, {
+      type: 'bar',
+      data: {
+        labels: Object.keys(ageBuckets),
+        datasets: [{ data: Object.values(ageBuckets), backgroundColor: '#7c83f5', borderRadius: 6 }]
+      },
+      options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#8b949e' } }, y: { ticks: { color: '#8b949e' } } } }
+    });
+  }
+
+  // 4. Crime Domains
+  const doms = {};
+  data.forEach(d => { const dm = d.domain || 'Other'; doms[dm] = (doms[dm] || 0) + 1; });
+  const domEl = document.getElementById('domChart');
+  if (domEl) {
+    new Chart(domEl, {
+      type: 'polarArea',
+      data: {
+        labels: Object.keys(doms),
+        datasets: [{ data: Object.values(doms), backgroundColor: ['#e74c3c99', '#f39c1299', '#9b59b699', '#3498db99'] }]
+      },
+      options: { responsive: true, plugins: { legend: { labels: { color: '#e6edf3' } } } }
+    });
+  }
+}
+
+// ── Interactive Map Marker Renderer (High-Contrast Color Scenes) ──
 function initAdminMap() {
-  // Small delay ensures container is visible & has dimensions
   setTimeout(() => {
-    aMap = L.map('adminMap', { preferCanvas: true }).setView([20.5937, 78.9629], 5);
-    // Use OpenStreetMap tiles - 100% free, no API key required
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors',
-      maxZoom: 19
-    }).addTo(aMap);
-    aLayer = L.layerGroup().addTo(aMap);
+    if (!aMap) {
+      aMap = L.map('adminMap').setView([20.5937, 78.9629], 5);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors',
+        maxZoom: 19
+      }).addTo(aMap);
+      aLayer = L.layerGroup().addTo(aMap);
+    }
     aMap.invalidateSize();
     renderMapMarkers();
-  }, 250);
+  }, 200);
 }
 
 function renderMapMarkers() {
   if (!aMap || !aLayer) return;
   aLayer.clearLayers();
-  const cf = document.getElementById('mapCity').value;
-  const tf = document.getElementById('mapType').value;
-  const colors = { 'Violent Crime':'#e74c3c','Fire Accident':'#f39c12','Traffic Fatality':'#9b59b6','Other Crime':'#3498db' };
-  const data = CrimeDB.getCrimeData().filter(d => (!cf || d.city === cf) && (!tf || d.crimeType === tf)).slice(0, 2000);
+
+  const cf = document.getElementById('mapCity')?.value || '';
+  const tf = document.getElementById('mapType')?.value || '';
+  const domainColors = {
+    'Violent Crime': '#e74c3c',
+    'Fire Accident': '#f39c12',
+    'Traffic Fatality': '#9b59b6',
+    'Other Crime': '#3498db'
+  };
+
+  const data = CrimeDB.getCrimeData().filter(d => (!cf || d.city === cf) && (!tf || d.crimeType === tf)).slice(0, 1500);
 
   data.forEach(d => {
     if (!d.lat || !d.lng) return;
+    const color = domainColors[d.domain] || '#3498db';
     L.circleMarker([d.lat, d.lng], {
-      radius: 6, fillColor: colors[d.domain] || '#95a5a6',
-      color: '#fff', weight: 1, fillOpacity: 0.82
+      radius: 7,
+      fillColor: color,
+      color: '#ffffff',
+      weight: 1.5,
+      fillOpacity: 0.88
     }).bindPopup(
-      `<div style="font-family:sans-serif;min-width:160px;">
-        <b style="font-size:13px;">${d.crimeType}</b><br/>
-        📍 <b>${d.city}</b><br/>
-        📅 ${d.dateOccurrence || 'N/A'}<br/>
-        🕐 ${d.timeOccurrence || 'N/A'}<br/>
-        🔫 ${d.weapon || 'None'}<br/>
-        <span style="color:${d.caseClosed==='Yes'?'#27ae60':'#f39c12'};font-weight:600;">
-          ${d.caseClosed==='Yes'?'✅ Closed':'⏳ Open'}
-        </span>
+      `<div style="font-family:sans-serif;min-width:180px;line-height:1.6;">
+        <span style="background:${color};color:#fff;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:800;">${d.domain}</span>
+        <div style="font-size:14px;font-weight:800;color:#111;margin-top:4px;">${d.crimeType}</div>
+        <div>📍 <b>${d.city}</b></div>
+        <div>📅 ${d.dateOccurrence || 'N/A'} at ${d.timeOccurrence || 'N/A'}</div>
+        <div>🔫 Weapon: <b>${d.weapon || 'None'}</b></div>
+        <div style="margin-top:4px;color:${d.caseClosed==='Yes'?'#27ae60':'#e67e22'};font-weight:700;">
+          ${d.caseClosed==='Yes'?'✅ Solved & Closed':'⏳ Case Open'}
+        </div>
       </div>`
     ).addTo(aLayer);
   });
 
-  // Show count
-  document.querySelector('.map-header h3').textContent =
-    `🗺️ Interactive Crime Map (${data.length.toLocaleString()} markers)`;
+  const headerTitle = document.querySelector('.map-header h3');
+  if (headerTitle) {
+    headerTitle.textContent = `🗺️ Interactive Crime Map (${data.length.toLocaleString()} scenes)`;
+  }
 
-  // If city filter, zoom to it
   if (cf && CrimeDB.CITY_COORDS[cf]) {
     aMap.setView(CrimeDB.CITY_COORDS[cf], 12);
   }
@@ -1250,6 +1502,113 @@ function enrichSOSIfMissing(s) {
 
 function renderUsers() {
   const users = CrimeDB.getAllUsers();
+  const activeUsers = users.filter(u => u.status !== 'removed' && !u.isSuspended);
+  const suspendedUsers = users.filter(u => u.status === 'removed' || u.isSuspended);
+  const requests = CrimeDB.getReactivationRequests().filter(r => r.status === 'pending');
+
+  // Update counters
+  const cAct = document.getElementById('countActiveUsers');
+  const cSusp = document.getElementById('countSuspendedUsers');
+  const cReq = document.getElementById('countRequests');
+  const hUsers = document.getElementById('hUsers');
+  const uCount = document.getElementById('userCount');
+
+  if (cAct) cAct.textContent = activeUsers.length;
+  if (cSusp) cSusp.textContent = suspendedUsers.length;
+  if (cReq) cReq.textContent = requests.length;
+  if (hUsers) hUsers.textContent = activeUsers.length + ' Users';
+  if (uCount) uCount.textContent = activeUsers.length + ' Active Citizens';
+
+  const grid = document.getElementById('usersGrid');
+  if (!grid) return;
+
+  if (userMgmtTab === 'requests') {
+    if (!requests.length) {
+      grid.innerHTML = '<div class="empty"><div class="ei">📩</div><p style="color:#fff;font-weight:700;">No pending citizen re-activation appeals</p><div style="font-size:11px;color:var(--muted);margin-top:4px;">All appeal requests have been processed.</div></div>';
+      return;
+    }
+    grid.innerHTML = `<div style="display:flex;flex-direction:column;gap:12px;">${requests.map(r => `
+      <div class="uc" style="background:rgba(26,26,38,.9);border:1px solid rgba(243,156,18,.35);padding:16px;border-radius:12px;">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <div class="av" style="background:rgba(243,156,18,.2);border:1px solid #f39c12;color:#f39c12;font-size:18px;">📩</div>
+            <div>
+              <div style="font-weight:800;font-size:14px;color:#fff;">${r.email}</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:2px;">Requested: ${new Date(r.requestedAt).toLocaleString()}</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button onclick="approveReactivation('${r.email}')" style="background:linear-gradient(135deg,#00b894,#00cec9);border:none;color:#fff;border-radius:8px;padding:6px 14px;font-size:12px;font-weight:800;cursor:pointer;box-shadow:0 2px 8px rgba(0,184,148,.3);">✅ Approve & Restore</button>
+            <button onclick="dismissRequest('${r.id}')" style="background:rgba(255,255,255,.08);border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;">✕ Dismiss</button>
+          </div>
+        </div>
+        <div style="background:rgba(0,0,0,.25);padding:10px 12px;border-radius:8px;font-size:12px;color:#f0f0f8;margin-top:12px;line-height:1.5;">
+          <b>Citizen's Message / Appeal:</b><br/>
+          "${r.message}"
+        </div>
+      </div>`).join('')}</div>`;
+    return;
+  }
+
+  const targetList = userMgmtTab === 'suspended' ? suspendedUsers : activeUsers;
+
+  if (!targetList.length) {
+    const emptyMsg = userMgmtTab === 'suspended' ? 'No suspended accounts. All registered citizens are active.' : 'No active citizen accounts found.';
+    grid.innerHTML = `<div class="empty"><div class="ei">${userMgmtTab === 'suspended' ? '🛡️' : '👤'}</div><p style="color:#fff;font-weight:700;">${emptyMsg}</p></div>`;
+    return;
+  }
+
+  grid.innerHTML = `<div class="ug">${targetList.map(u => {
+    const isSusp = u.status === 'removed' || u.isSuspended;
+    return `<div class="uc" style="background:rgba(26,26,38,.85);border:1px solid ${isSusp ? 'rgba(231,76,60,.4)' : 'rgba(255,255,255,.08)'};border-radius:14px;padding:16px;">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+        <div class="av" style="background:${isSusp ? 'rgba(231,76,60,.2)' : 'linear-gradient(135deg,var(--primary),var(--accent))'};color:${isSusp ? '#ff7675' : '#fff'};font-weight:800;">${(u.name||'U')[0].toUpperCase()}</div>
+        <div>
+          <div style="font-weight:800;font-size:14px;color:#fff;">${u.name}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px;">${u.email}</div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">📱 Phone: ${u.phone || 'Not provided'}</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">🗓️ Joined: ${u.createdAt?.slice(0,10) || 'N/A'}</div>
+
+      ${isSusp ? `<div style="background:rgba(231,76,60,.12);border:1px solid rgba(231,76,60,.3);border-radius:8px;padding:8px 10px;font-size:11px;color:#ff7675;margin-bottom:12px;line-height:1.4;">
+        <b>Reason:</b> ${u.removalReason || 'Suspended by Administrator'}<br/>
+        <small style="color:var(--muted);">Suspended on: ${u.removedAt ? new Date(u.removedAt).toLocaleDateString() : 'Recent'}</small>
+      </div>` : ''}
+
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;">
+        <span class="pill ${isSusp ? 'p-r' : (u.mustChange ? 'p-o' : 'p-g')}">${isSusp ? '🚫 Suspended' : (u.mustChange ? '⚠️ Default PW' : '✅ Active')}</span>
+        ${isSusp ? `<button onclick="restoreUserAccount('${u.id}', '${u.name}')" style="background:linear-gradient(135deg,#00b894,#00cec9);border:none;color:#fff;border-radius:8px;padding:5px 12px;font-size:11px;font-weight:800;cursor:pointer;">♻️ Restore</button>` : `<button onclick="promptRemoveUserWithReason('${u.id}', '${u.name}', '${u.email}')" style="background:rgba(231,76,60,.15);border:1px solid rgba(231,76,60,.4);color:#ff7675;border-radius:8px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;transition:all .2s;">🚫 Suspend / Remove</button>`}
+      </div>
+    </div>`;
+  }).join('')}</div>`;
+}
+function enrichSOSIfMissing(s) {
+  if (!s || !s.id || enrichedSOSIds.has(s.id)) return;
+  if ((!s.address || s.address === 'Unknown address' || !s.nearbyPlaces || !s.nearbyPlaces.length) && s.lat && s.lng) {
+    enrichedSOSIds.add(s.id);
+    fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${s.lat}&lon=${s.lng}&zoom=18&addressdetails=1`, {
+      headers: { 'Accept': 'application/json' }
+    }).then(r => r.json()).then(data => {
+      if (data) {
+        const address = data.display_name || s.address;
+        const addr = data.address || {};
+        const nearby = [...(s.nearbyPlaces || [])];
+        if (addr.amenity && !nearby.some(p=>p.name===addr.amenity)) nearby.push({ name: addr.amenity, type: 'amenity' });
+        if (addr.shop && !nearby.some(p=>p.name===addr.shop)) nearby.push({ name: addr.shop, type: 'shop' });
+        if (addr.hospital && !nearby.some(p=>p.name===addr.hospital)) nearby.push({ name: addr.hospital, type: 'hospital' });
+        if (addr.police && !nearby.some(p=>p.name===addr.police)) nearby.push({ name: addr.police, type: 'police' });
+        if (addr.road && !nearby.some(p=>p.name===addr.road)) nearby.push({ name: addr.road, type: 'road' });
+        if (addr.suburb && !nearby.some(p=>p.name===addr.suburb)) nearby.push({ name: addr.suburb, type: 'suburb' });
+        CrimeDB.updateSOS(s.id, { address, nearbyPlaces: nearby });
+        renderSOS();
+      }
+    }).catch(()=>{});
+  }
+}
+
+function renderUsers() {
+  const users = CrimeDB.getAllUsers();
   document.getElementById('userCount').textContent = users.length + ' users';
   if (!users.length) {
     document.getElementById('usersGrid').innerHTML = '<div class="empty"><div class="ei">👤</div><p>No users registered yet</p></div>';
@@ -1389,5 +1748,40 @@ document.addEventListener('click', () => {
   }, { passive: true });
 });
 </script>
+
+<!-- ══ REMOVE USER WITH REASON MODAL ══ -->
+<div class="overlay" id="removeUserModal" style="display:none;position:fixed;inset:0;background:rgba(10,10,15,.85);backdrop-filter:blur(6px);z-index:99999;align-items:center;justify-content:center;padding:20px;">
+  <div style="background:var(--surface);border:1px solid rgba(231,76,60,.4);border-radius:16px;max-width:460px;width:100%;padding:24px;box-shadow:0 12px 40px rgba(0,0,0,.6);">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+      <div style="width:42px;height:42px;border-radius:50%;background:rgba(231,76,60,.18);color:#ff7675;display:flex;align-items:center;justify-content:center;font-size:20px;">🚫</div>
+      <div>
+        <h3 style="color:#fff;font-size:16px;font-weight:800;">Suspend / Remove User</h3>
+        <div style="font-size:12px;color:var(--muted);" id="remUserSub">Select a reason for account removal</div>
+      </div>
+    </div>
+
+    <div style="margin-bottom:12px;">
+      <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:6px;">Standard Reason Preset:</label>
+      <select id="remReasonPreset" onchange="onPresetChange()" style="width:100%;background:var(--card);border:1px solid var(--border);color:#fff;padding:8px 10px;border-radius:8px;font-size:12px;">
+        <option value="Policy violation / Abuse of emergency SOS system">Policy violation / Abuse of emergency SOS system</option>
+        <option value="Suspicious or unverified activity reported">Suspicious or unverified activity reported</option>
+        <option value="Citizen account duplicate / Inactive">Citizen account duplicate / Inactive</option>
+        <option value="Account compromised / Security precautionary hold">Account compromised / Security precautionary hold</option>
+        <option value="custom">Other / Custom Reason...</option>
+      </select>
+    </div>
+
+    <div style="margin-bottom:16px;">
+      <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:6px;">Detailed Reason for Citizen (Sent to their login screen):</label>
+      <textarea id="remReasonDetails" style="width:100%;height:80px;background:var(--card);border:1px solid var(--border);color:#fff;padding:10px;border-radius:8px;font-size:12px;font-family:inherit;resize:none;">Policy violation / Abuse of emergency SOS system</textarea>
+    </div>
+
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button onclick="closeRemoveUserModal()" style="background:rgba(255,255,255,.08);border:1px solid var(--border);color:var(--muted);padding:9px 16px;border-radius:8px;font-size:12px;cursor:pointer;">Cancel</button>
+      <button onclick="confirmRemoveUser()" style="background:linear-gradient(135deg,#c0392b,#e74c3c);border:none;color:#fff;padding:9px 18px;border-radius:8px;font-weight:800;font-size:12px;cursor:pointer;">🚫 Confirm Removal</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>

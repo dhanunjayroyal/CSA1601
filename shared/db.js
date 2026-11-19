@@ -119,7 +119,11 @@ const CrimeDB = (() => {
         if (!u || !u.email) return;
         const safe = {
           id: u.id, name: u.name, email: u.email, phone: u.phone || '',
-          role: u.role, createdAt: u.createdAt, mustChange: u.mustChange
+          role: u.role, createdAt: u.createdAt, mustChange: u.mustChange,
+          status: u.status || 'active',
+          isSuspended: !!u.isSuspended,
+          removalReason: u.removalReason || null,
+          removedAt: u.removedAt || null
         };
         map.set(u.email, Object.assign({}, map.get(u.email) || {}, safe));
       });
@@ -343,7 +347,12 @@ const CrimeDB = (() => {
   }
 
   function loginUser(email, pw){
-    return JSON.parse(localStorage.getItem(USERS_KEY) || '[]').find(u => u.email === email && u.password === pw) || null;
+    const user = JSON.parse(localStorage.getItem(USERS_KEY) || '[]').find(u => u.email === email && u.password === pw);
+    if (!user) return null;
+    if (user.status === 'removed' || user.isSuspended) {
+      return { error: 'ACCOUNT_REMOVED', user, reason: user.removalReason || 'Account suspended by Administrator' };
+    }
+    return user;
   }
 
   function registerUser(name, email, phone, password){
@@ -484,6 +493,82 @@ const CrimeDB = (() => {
     try { sessionStorage.removeItem('cw_sess_' + t); } catch(e){}
   }
 
+  
+  const REQS_KEY = 'cw_reactivation_requests';
+
+  function removeUser(id, reason) {
+    let u = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+    const idx = u.findIndex(x => x.id === id);
+    if (idx === -1) return false;
+    u[idx].status = 'removed';
+    u[idx].isSuspended = true;
+    u[idx].removalReason = reason || 'Account removed by Administrator';
+    u[idx].removedAt = new Date().toISOString();
+    localStorage.setItem(USERS_KEY, JSON.stringify(u));
+    broadcastLocal('USER_UPDATE', u[idx]);
+    syncUsersToCloud();
+    return true;
+  }
+
+  function restoreUser(id) {
+    let u = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+    const idx = u.findIndex(x => x.id === id);
+    if (idx === -1) return false;
+    u[idx].status = 'active';
+    u[idx].isSuspended = false;
+    u[idx].removalReason = null;
+    u[idx].restoredAt = new Date().toISOString();
+    localStorage.setItem(USERS_KEY, JSON.stringify(u));
+    
+    // Resolve any pending reactivation request for this email
+    try {
+      let reqs = JSON.parse(localStorage.getItem(REQS_KEY) || '[]');
+      reqs.forEach(r => { if (r.email === u[idx].email) r.status = 'approved'; });
+      localStorage.setItem(REQS_KEY, JSON.stringify(reqs));
+    } catch(e){}
+
+    broadcastLocal('USER_UPDATE', u[idx]);
+    syncUsersToCloud();
+    return true;
+  }
+
+  function getReactivationRequests() {
+    try {
+      return JSON.parse(localStorage.getItem(REQS_KEY) || '[]');
+    } catch(e) { return []; }
+  }
+
+  function requestReactivation(email, message) {
+    try {
+      const reqs = getReactivationRequests();
+      const existing = reqs.find(r => r.email === email && r.status === 'pending');
+      if (existing) {
+        existing.message = message;
+        existing.requestedAt = new Date().toISOString();
+      } else {
+        reqs.unshift({
+          id: 'req_' + Date.now(),
+          email,
+          message: message || 'Citizen requested account re-activation',
+          status: 'pending',
+          requestedAt: new Date().toISOString()
+        });
+      }
+      localStorage.setItem(REQS_KEY, JSON.stringify(reqs));
+      broadcastLocal('REACTIVATION_REQ', { email, message });
+      return true;
+    } catch(e) { return false; }
+  }
+
+  function dismissReactivationRequest(id) {
+    try {
+      let reqs = getReactivationRequests();
+      reqs = reqs.filter(r => r.id !== id);
+      localStorage.setItem(REQS_KEY, JSON.stringify(reqs));
+      return true;
+    } catch(e) { return false; }
+  }
+
   function deleteUser(id) {
     let u = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
     const target = u.find(x => x.id === id);
@@ -524,7 +609,7 @@ const CrimeDB = (() => {
     CITY_COORDS,
     getCrimeData, addCrime, addCrimesBulk, deleteCrime,
     loginAdmin, loginUser, registerUser,
-    changeUserPassword, changeAdminPassword, updateUser, deleteUser,
+    changeUserPassword, changeAdminPassword, updateUser, deleteUser, removeUser, restoreUser, requestReactivation, getReactivationRequests, dismissReactivationRequest,
     getAllUsers, getAllAdmins,
     sendSOS, updateSOS, getSOSAlerts, resolveSOSAlert,
     getEmergencyContacts, saveEmergencyContacts,
