@@ -593,8 +593,31 @@ function dismissTopBanner() {
   if (topBanner) topBanner.style.display = 'none';
 }
 
+function showAdminToast(msg, type = 'success') {
+  let toast = document.getElementById('adminAppToast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'adminAppToast';
+    toast.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:9999999;background:rgba(20,22,30,0.96);backdrop-filter:blur(12px);border:1px solid rgba(0,184,148,0.5);color:#fff;padding:12px 20px;border-radius:10px;font-size:13px;font-weight:700;box-shadow:0 8px 30px rgba(0,0,0,0.5);display:flex;align-items:center;gap:10px;transition:all 0.3s cubic-bezier(0.16,1,0.3,1);opacity:0;transform:translateY(20px);pointer-events:none;';
+    document.body.appendChild(toast);
+  }
+
+  const isWarning = type === 'warning';
+  toast.style.borderColor = isWarning ? 'rgba(243,156,18,0.6)' : 'rgba(0,184,148,0.6)';
+  toast.style.boxShadow = isWarning ? '0 8px 30px rgba(243,156,18,0.25)' : '0 8px 30px rgba(0,184,148,0.25)';
+  toast.innerHTML = msg;
+  toast.style.opacity = '1';
+  toast.style.transform = 'translateY(0)';
+
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateY(20px)';
+  }, 3500);
+}
+
 function resolveAlert(id) {
-  if (!confirm('Mark this emergency SOS incident as SOLVED?\n\nThis case will be archived and saved into the database records.')) return;
+  // Directly mark as resolved — zero browser confirm/cancel popups, zero auto-download
   CrimeDB.resolveSOSAlert(id);
 
   // Explicitly persist into solved Excel records database
@@ -617,16 +640,15 @@ function resolveAlert(id) {
 
   // Switch to Solved Cases tab so admin immediately sees it saved in records
   setSosFilter('resolved');
-  alert('✅ Case #' + id.slice(-6) + ' is marked as SOLVED and saved in records.\n\nNo file was downloaded. Click the "📥 Download Excel (.xlsx)" button whenever you want to export.');
+
+  // Smooth, non-blocking in-app notification with zero download or cancel prompt
+  showAdminToast('✅ Case #' + id.slice(-6) + ' saved to database as SOLVED. (No file downloaded)');
 }
 
 function markMistakeAlert(id) {
-  const reason = prompt('Please specify note for marking this alert as accidental / false alarm:', 'False alarm / Accidental citizen trigger');
-  if (reason === null) return;
-
   CrimeDB.updateSOS(id, {
     status: 'cancelled',
-    cancelReason: reason || 'Accidental click / false alarm confirmed by admin',
+    cancelReason: 'Accidental click / false alarm confirmed by admin',
     resolvedAt: new Date().toISOString()
   });
 
@@ -636,7 +658,7 @@ function markMistakeAlert(id) {
   }
 
   setSosFilter('cancelled');
-  alert('⚠️ Incident marked as Accidental / False Alarm and moved to history.');
+  showAdminToast('⚠️ Case #' + id.slice(-6) + ' marked as Accidental Mistake & archived.', 'warning');
 }
 
 function exportSingleSOSToExcel(id) {

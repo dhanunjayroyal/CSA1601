@@ -448,6 +448,9 @@ body.sos-open{overflow:hidden !important;}
   <button class="btn-cancel" onclick="dismissSOS()" style="width:100%;max-width:440px;padding:12px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);color:#fff;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;">
     ✅ I'm Safe Now – Stop Siren & Dismiss
   </button>
+  <button onclick="cancelSOSAsMistake()" style="width:100%;max-width:440px;margin-top:8px;padding:10px;background:rgba(243,156,18,.15);border:1px solid rgba(243,156,18,.35);color:#f39c12;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;">
+    ⚠️ Triggered by Mistake (Cancel Alert)
+  </button>
 </div>
 
 <!-- ══ Incident Detail Modal ══ -->
@@ -1389,6 +1392,24 @@ function getDistanceKm(lat1, lon1, lat2, lon2) {
             Math.sin(dLon/2) * Math.sin(dLon/2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
   return Math.round((R * c) * 10) / 10;
+}
+
+function showToast(msg) {
+  let t = document.getElementById('userAppToast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'userAppToast';
+    t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:rgba(20,22,30,0.96);backdrop-filter:blur(10px);border:1px solid rgba(243,156,18,0.5);color:#fff;padding:12px 24px;border-radius:12px;font-size:13px;font-weight:700;box-shadow:0 8px 30px rgba(0,0,0,0.6);z-index:999999;transition:all .3s ease;opacity:0;pointer-events:none;';
+    document.body.appendChild(t);
+  }
+  t.innerHTML = msg;
+  t.style.opacity = '1';
+  t.style.transform = 'translateX(-50%) translateY(0)';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => {
+    t.style.opacity = '0';
+    t.style.transform = 'translateX(-50%) translateY(20px)';
+  }, 3500);
 }
 
 function cancelSOSAsMistake() {
