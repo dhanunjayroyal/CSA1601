@@ -609,21 +609,52 @@ function applyGPSPosition(lat, lng, acc) {
     if (d < minD) { minD = d; nearest = c; }
   });
 
+  // If there's an active citizen SOS, sync new coordinates to Admin & Cloud immediately
+  if (activeSOSId) {
+    CrimeDB.updateSOS(activeSOSId, {
+      lat: lat,
+      lng: lng,
+      accuracy: acc,
+      city: nearest
+    });
+  }
+
   // Load safety stats for the nearest city while strictly preserving EXACT citizen GPS coordinates
   loadCitySafety(nearest, true);
 
-  // Reverse geocode real location name for UI header
+  // Reverse geocode real location name for UI header and inputs
   fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=15&addressdetails=1`)
     .then(r => r.json())
     .then(data => {
+      let locTitle = '';
       if (data && data.address) {
         const sub = data.address.suburb || data.address.neighbourhood || data.address.residential || data.address.road || '';
         const cityArea = data.address.city || data.address.town || data.address.village || data.address.county || nearest;
         const st = data.address.state || '';
-        const locTitle = [sub, cityArea, st].filter(Boolean).join(', ');
-        if (locTitle) {
-          document.getElementById('scoreCity').textContent = '📍 ' + locTitle;
-          document.getElementById('searchCity').value = locTitle;
+        locTitle = [sub, cityArea, st].filter(Boolean).join(', ');
+      }
+      if (!locTitle) {
+        locTitle = `${lat.toFixed(4)}°N, ${lng.toFixed(4)}°E (${nearest})`;
+      }
+
+      const scoreEl = document.getElementById('scoreCity');
+      if (scoreEl) scoreEl.textContent = '📍 ' + locTitle;
+
+      const cityInp = document.getElementById('cityInput');
+      if (cityInp) cityInp.value = locTitle;
+
+      // Sync resolved street address to active SOS on Admin side in real time
+      if (activeSOSId) {
+        CrimeDB.updateSOS(activeSOSId, {
+          lat: lat,
+          lng: lng,
+          accuracy: acc,
+          address: locTitle,
+          city: nearest
+        });
+        const sosLocInfo = document.getElementById('sosLocInfo');
+        if (sosLocInfo) {
+          sosLocInfo.innerHTML = `📍 <b>Current Location:</b> ${locTitle}`;
         }
       }
     })
@@ -685,7 +716,19 @@ function getCurrentLocation() {
 
 function onCityType(val) {
   const match = CITIES.find(c => c.toLowerCase() === val.trim().toLowerCase());
-  if (match) loadCitySafety(match);
+  if (match) {
+    hasRealGPS = false;
+    loadCitySafety(match, false);
+    if (activeSOSId) {
+      const coords = CrimeDB.CITY_COORDS[match] || [19.0760, 72.8777];
+      CrimeDB.updateSOS(activeSOSId, {
+        city: match,
+        lat: coords[0],
+        lng: coords[1],
+        address: match + ', India'
+      });
+    }
+  }
 }
 
 // ── Load City Safety ──────────────────────────────────────
@@ -779,26 +822,28 @@ function loadCitySafety(city, preserveExactCoords) {
 
 // ── Leaflet User Map ──────────────────────────────────────
 function initUserMap(city, data) {
-  const coords = CrimeDB.CITY_COORDS[city] || [19.0760, 72.8777];
+  const defaultCityCoords = CrimeDB.CITY_COORDS[city] || [19.0760, 72.8777];
+  const centerCoords = (hasRealGPS && userLat && userLng) ? [userLat, userLng] : defaultCityCoords;
+
   if (!userMapObj) {
     userMapObj = L.map('userMap', {
       zoomControl: true,
       preferCanvas: true
-    }).setView(coords, 12);
+    }).setView(centerCoords, 13);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© OpenStreetMap contributors',
       maxZoom: 19
     }).addTo(userMapObj);
   } else {
-    userMapObj.setView(coords, 12);
+    userMapObj.setView(centerCoords, 13);
     userMapObj.eachLayer(l => { if (!l._url) userMapObj.removeLayer(l); });
   }
 
   userMapObj.invalidateSize();
 
-  // 5km Radius Circle
-  L.circle(coords, {
+  // 5km Radius Circle centered on citizen's real position
+  L.circle(centerCoords, {
     radius: 5000, color: '#e84393', fillColor: '#e84393', fillOpacity: 0.08, weight: 2, dashArray: '6,4'
   }).addTo(userMapObj);
 
@@ -822,13 +867,14 @@ function initUserMap(city, data) {
     </div>`).addTo(userMapObj);
   });
 
-  // User Location Pin
-  L.marker(coords, {
+  // User Real Physical Location Pin
+  const pinLabel = hasRealGPS ? '📍 Your Current GPS Location' : '📍 Selected City Center: ' + city;
+  L.marker(centerCoords, {
     icon: L.divIcon({
       className: '',
-      html: '<div style="background:#e84393;width:14px;height:14px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 12px rgba(232,67,147,.9);"></div>'
+      html: '<div style="background:#e84393;width:16px;height:16px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 14px rgba(232,67,147,.95);"></div>'
     })
-  }).bindPopup('📍 Your Selected City: ' + city).addTo(userMapObj);
+  }).bindPopup(pinLabel).addTo(userMapObj);
 
   setTimeout(() => { if (userMapObj) userMapObj.invalidateSize(); }, 250);
 }

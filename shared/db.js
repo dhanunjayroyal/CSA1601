@@ -224,7 +224,13 @@ const CrimeDB = (() => {
                 const localPrev = localList.find(x => x.id === ca.id);
                 if (!existed) {
                   hasChange = true;
-                } else if (localPrev && (localPrev.status !== ca.status || localPrev.address !== ca.address)) {
+                } else if (localPrev && (
+                  localPrev.status !== ca.status ||
+                  localPrev.address !== ca.address ||
+                  localPrev.lat !== ca.lat ||
+                  localPrev.lng !== ca.lng ||
+                  localPrev.city !== ca.city
+                )) {
                   hasChange = true;
                 }
                 mergeSOS(ca);
