@@ -490,7 +490,7 @@ tr:last-child td{border-bottom:none;}
           </div>
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
             <button class="btn btn-p" onclick="exportSOSToExcel()" style="background:linear-gradient(135deg,#27ae60,#2ecc71);border:none;box-shadow:0 4px 12px rgba(39,174,96,.3);font-size:12px;font-weight:800;display:flex;align-items:center;gap:6px;cursor:pointer;">
-              📊 Export to Excel (.xlsx)
+              📥 Download Excel (.xlsx)
             </button>
             <button class="btn btn-s" onclick="renderSOS()" style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
               🔄 Refresh
@@ -594,7 +594,7 @@ function dismissTopBanner() {
 }
 
 function resolveAlert(id) {
-  if (!confirm('Mark this emergency SOS incident as SOLVED?\n\nThis will archive the alert and generate an updated Excel log.')) return;
+  if (!confirm('Mark this emergency SOS incident as SOLVED?\n\nThis will archive the alert and save it into the Solved Cases records.')) return;
   CrimeDB.resolveSOSAlert(id);
 
   const remainingActive = CrimeDB.getSOSAlerts().filter(s => s.status === 'active').length;
@@ -602,14 +602,9 @@ function resolveAlert(id) {
     try { stopAdminAlarm(); } catch(e){}
   }
 
-  try {
-    exportSOSToExcel();
-  } catch(e) {
-    console.error('Auto Excel export error:', e);
-  }
-
+  // Switch to Solved Cases tab so admin immediately sees it saved in the records
   setSosFilter('resolved');
-  alert('✅ Case #' + id.slice(-6) + ' marked as SOLVED & archived!\nAn updated Excel report has been downloaded.');
+  alert('✅ Case #' + id.slice(-6) + ' is SOLVED and saved in the records database.\n\nYou can click "📥 Download Excel (.xlsx)" anytime to download the Excel sheet.');
 }
 
 function markMistakeAlert(id) {
@@ -1649,7 +1644,7 @@ function renderSOS() {
         ` : `
           <span style="font-size:11px;color:var(--muted);">Archived on ${s.resolvedAt ? new Date(s.resolvedAt).toLocaleString() : 'Done'}</span>
           <button onclick="exportSingleSOSToExcel('${s.id}')" style="background:rgba(39,174,96,.15);border:1px solid rgba(39,174,96,.35);color:#2ecc71;padding:6px 12px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;">
-            📊 Export Case (.xlsx)
+            📥 Download Case (.xlsx)
           </button>
         `}
       </div>
