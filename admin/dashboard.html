@@ -1484,17 +1484,15 @@ function showSOSAlarm() {
 
 function checkNewSOS() {
   const sos = CrimeDB.getSOSAlerts();
-  const active = sos.filter(s => s.status === 'active').length;
-  if (active > lastSOSCount) {
-    try { playSOSAlarm(); } catch(e) {}
-    showSOSAlarm();
-    document.getElementById('sosPill')?.classList.add('ringing');
-    setTimeout(() => document.getElementById('sosPill')?.classList.remove('ringing'), 5000);
-  }
-  lastSOSCount = active;
-  updateSOSBadge(active);
-  if (document.getElementById('page-sos')?.classList.contains('active')) {
-    renderSOS();
+  const activeAlerts = sos.filter(s => s.status === 'active');
+  const unnotified = activeAlerts.find(s => s && s.id && !notifiedSOSIds.has(s.id));
+  if (unnotified) {
+    handleSOSNotification(unnotified, true);
+  } else {
+    updateSOSBadge(activeAlerts.length);
+    if (document.getElementById('page-sos')?.classList.contains('active')) {
+      renderSOS();
+    }
   }
 }
 
@@ -1856,9 +1854,15 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-// Realtime cross-device cloud listener for instant SOS and Users
-let lastHandledSOSId = null;
-CrimeDB.onSOS((alert, isNew) => {
+// Unified SOS Notification Deduplication (Guarantees exactly ONE notification per SOS click)
+const notifiedSOSIds = new Set();
+try {
+  CrimeDB.getSOSAlerts().filter(s => s && s.status === 'active').forEach(s => {
+    if (s && s.id) notifiedSOSIds.add(s.id);
+  });
+} catch(e){}
+
+function handleSOSNotification(alert, isExplicitNew) {
   const sos = CrimeDB.getSOSAlerts();
   const activeAlerts = sos.filter(s => s.status === 'active');
   const activeCount = activeAlerts.length;
@@ -1881,19 +1885,27 @@ CrimeDB.onSOS((alert, isNew) => {
       }
     }
 
-    // Play horn alarm if new alert OR if alarm not yet sounding
-    if (isNew || !adminSirenPlaying) {
+    // Check if this specific alert has ALREADY triggered its initial notification
+    const targetAlert = (alert && alert.id) ? alert : latest;
+    const isAlreadyNotified = targetAlert && targetAlert.id && notifiedSOSIds.has(targetAlert.id);
+
+    // ONLY notify and play alarm ONCE per unique SOS incident ID
+    if (!isAlreadyNotified && (isExplicitNew || (targetAlert && targetAlert.id))) {
+      if (targetAlert && targetAlert.id) notifiedSOSIds.add(targetAlert.id);
+
       playSOSAlarm();
       showSOSAlarm();
       document.getElementById('sosPill')?.classList.add('ringing');
       setTimeout(() => document.getElementById('sosPill')?.classList.remove('ringing'), 6000);
 
-      // Native Desktop Notification
+      // Native Desktop Notification (deduplicated with unique tag)
       try {
         if ('Notification' in window) {
           if (Notification.permission === 'granted') {
             new Notification('🚨 CRIMEWATCH: NEW CITIZEN SOS!', {
-              body: (latest.userName || 'Citizen') + ' activated emergency SOS! Location: ' + (latest.address || latest.city || 'Unknown'),
+              body: `${targetAlert.userName || 'Citizen'} activated emergency SOS! Location: ${targetAlert.address || targetAlert.city || 'Emergency Zone'}`,
+              tag: 'sos_' + targetAlert.id,
+              renotify: false,
               requireInteraction: true
             });
           } else if (Notification.permission !== 'denied') {
@@ -1903,10 +1915,14 @@ CrimeDB.onSOS((alert, isNew) => {
       } catch(e){}
     }
   } else {
-    // All SOS resolved
+    // All active SOS alerts resolved or cleared
     if (topBanner) topBanner.style.display = 'none';
     stopAdminAlarm();
   }
+}
+
+CrimeDB.onSOS((alert, isNew) => {
+  handleSOSNotification(alert, isNew);
 });
 
 CrimeDB.onUser(u => {
