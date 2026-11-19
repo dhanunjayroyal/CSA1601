@@ -1551,8 +1551,6 @@ function stopAdminAlarm() {
       sirenAudioEl.currentTime = 0;
     }
   } catch(e){}
-  const b = document.getElementById('activeSosTopBanner');
-  if (b) b.style.display = 'none';
   updateSoundUI();
 }
 
@@ -1620,7 +1618,7 @@ function showSOSAlarm() {
 function checkNewSOS() {
   const sos = CrimeDB.getSOSAlerts();
   const activeAlerts = sos.filter(s => s.status === 'active');
-  const unnotified = activeAlerts.find(s => s && s.id && !desktopNotifiedIds.has(s.id));
+  const unnotified = activeAlerts.find(s => s && s.id && !notifiedIncidentIds.has(s.id));
   if (unnotified) {
     handleSOSNotification(unnotified, true);
   } else {
@@ -1989,11 +1987,11 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-// Unified SOS Notification Deduplication (Guarantees exactly ONE desktop popup per SOS click)
-const desktopNotifiedIds = new Set();
+// Unified SOS Notification Deduplication (Guarantees exactly ONE notification & siren alarm per SOS click)
+const notifiedIncidentIds = new Set();
 try {
-  CrimeDB.getSOSAlerts().filter(s => s && s.status === 'active').forEach(s => {
-    if (s && s.id) desktopNotifiedIds.add(s.id);
+  CrimeDB.getSOSAlerts().forEach(s => {
+    if (s && s.id) notifiedIncidentIds.add(s.id);
   });
 } catch(e){}
 
@@ -2020,28 +2018,38 @@ function handleSOSNotification(alert, isExplicitNew) {
       }
     }
 
-    const targetAlert = (alert && alert.id) ? alert : latest;
+    // Determine if this is an active alert that has NEVER sounded/notified on admin console yet
+    let newAlertToNotify = null;
+    if (alert && alert.id && alert.status === 'active' && !notifiedIncidentIds.has(alert.id)) {
+      newAlertToNotify = alert;
+    } else {
+      newAlertToNotify = activeAlerts.find(s => s && s.id && !notifiedIncidentIds.has(s.id));
+    }
 
-    // Siren alarm: ALWAYS trigger emergency siren on explicit new SOS or if not currently sounding
-    if (isExplicitNew || !adminSirenPlaying) {
+    // Siren alarm and notifications trigger EXACTLY ONCE per new alert
+    if (newAlertToNotify && newAlertToNotify.id) {
+      notifiedIncidentIds.add(newAlertToNotify.id);
+
+      // 1. Play siren horn alarm ONCE
       playSOSAlarm();
+
+      // 2. Show floating alarm toast ONCE
       showSOSAlarm();
+
+      // 3. Ring sidebar SOS pill ONCE
       const pill = document.getElementById('sosPill');
       if (pill) {
         pill.classList.add('ringing');
         setTimeout(() => pill.classList.remove('ringing'), 6000);
       }
-    }
 
-    // Native Desktop Notification (deduplicated: exactly ONE notification popup per incident)
-    if (targetAlert && targetAlert.id && !desktopNotifiedIds.has(targetAlert.id)) {
-      desktopNotifiedIds.add(targetAlert.id);
+      // 4. Native Desktop Notification ONCE
       try {
         if ('Notification' in window) {
           if (Notification.permission === 'granted') {
             new Notification('🚨 CRIMEWATCH: NEW CITIZEN SOS!', {
-              body: `${targetAlert.userName || 'Citizen'} activated emergency SOS! Location: ${targetAlert.address || targetAlert.city || 'Emergency Zone'}`,
-              tag: 'sos_' + targetAlert.id,
+              body: `${newAlertToNotify.userName || 'Citizen'} activated emergency SOS! Location: ${newAlertToNotify.address || newAlertToNotify.city || 'Emergency Zone'}`,
+              tag: 'sos_' + newAlertToNotify.id,
               renotify: false,
               requireInteraction: true
             });

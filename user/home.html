@@ -1179,7 +1179,7 @@ function testUserSiren() {
 // ── SOS Button Handling ───────────────────────────────────
 function sosStart(e) {
   if (e && e.type === 'touchstart') e.preventDefault();
-  if (sosActive) return;
+  if (sosActive || activeSOSId) return;
   unlockUserAudio();
   sosProgress = 0;
   sosBtn.classList.add('pressing');
@@ -1225,6 +1225,7 @@ sosBtn.addEventListener('touchcancel', sosEnd, { passive: false });
 let activeSOSId = null;
 
 async function triggerSOS() {
+  if (sosActive || activeSOSId) return;
   sosActive = true;
   sosBtn.classList.remove('pressing');
   // Mobile vibration feedback

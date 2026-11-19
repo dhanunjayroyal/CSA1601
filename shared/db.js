@@ -215,10 +215,18 @@ const CrimeDB = (() => {
               const cloudAlerts = parsed.alerts || [];
               cachedCloudSOS = cloudAlerts;
               let latestNewAlert = null;
+              let hasChange = false;
 
               cloudAlerts.forEach(ca => {
                 if (!ca || !ca.id) return;
                 const existed = knownSOSIds.has(ca.id);
+                const localList = JSON.parse(localStorage.getItem(SOS_KEY) || '[]');
+                const localPrev = localList.find(x => x.id === ca.id);
+                if (!existed) {
+                  hasChange = true;
+                } else if (localPrev && (localPrev.status !== ca.status || localPrev.address !== ca.address)) {
+                  hasChange = true;
+                }
                 mergeSOS(ca);
                 if (!existed && ca.status === 'active') {
                   latestNewAlert = ca;
@@ -228,7 +236,7 @@ const CrimeDB = (() => {
 
               if (latestNewAlert) {
                 notifySOS(latestNewAlert, true);
-              } else {
+              } else if (hasChange) {
                 notifySOS(null, false);
               }
             } catch(e){}
