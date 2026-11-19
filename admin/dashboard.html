@@ -569,7 +569,7 @@ tr:last-child td{border-bottom:none;}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 <script src="../shared/crime-data-inline.js"></script>
-<script src="../shared/db.js"></script>
+<script src="../shared/db.js?v=20261119_4"></script>
 <script>
 
 // ── Critical Global State & Declarations ──
@@ -594,17 +594,30 @@ function dismissTopBanner() {
 }
 
 function resolveAlert(id) {
-  if (!confirm('Mark this emergency SOS incident as SOLVED?\n\nThis will archive the alert and save it into the Solved Cases records.')) return;
+  if (!confirm('Mark this emergency SOS incident as SOLVED?\n\nThis case will be archived and saved into the database records.')) return;
   CrimeDB.resolveSOSAlert(id);
+
+  // Explicitly persist into solved Excel records database
+  try {
+    const all = CrimeDB.getSOSAlerts();
+    const found = all.find(s => s.id === id);
+    if (found) {
+      const records = JSON.parse(localStorage.getItem('cw_solved_excel_records') || '[]');
+      const idx = records.findIndex(r => r.id === id);
+      if (idx !== -1) records[idx] = found;
+      else records.push(found);
+      localStorage.setItem('cw_solved_excel_records', JSON.stringify(records));
+    }
+  } catch(e){}
 
   const remainingActive = CrimeDB.getSOSAlerts().filter(s => s.status === 'active').length;
   if (remainingActive === 0) {
     try { stopAdminAlarm(); } catch(e){}
   }
 
-  // Switch to Solved Cases tab so admin immediately sees it saved in the records
+  // Switch to Solved Cases tab so admin immediately sees it saved in records
   setSosFilter('resolved');
-  alert('✅ Case #' + id.slice(-6) + ' is SOLVED and saved in the records database.\n\nYou can click "📥 Download Excel (.xlsx)" anytime to download the Excel sheet.');
+  alert('✅ Case #' + id.slice(-6) + ' is marked as SOLVED and saved in records.\n\nNo file was downloaded. Click the "📥 Download Excel (.xlsx)" button whenever you want to export.');
 }
 
 function markMistakeAlert(id) {
@@ -637,7 +650,16 @@ function exportSOSToExcel(customList, customName) {
     alert('Excel exporter library is loading. Please try again in 2 seconds.');
     return;
   }
-  const alertsToExport = customList || CrimeDB.getSOSAlerts();
+  const allAlerts = CrimeDB.getSOSAlerts();
+  let extraSolved = [];
+  try {
+    extraSolved = JSON.parse(localStorage.getItem('cw_solved_excel_records') || '[]');
+  } catch(e){}
+  const alertMap = new Map();
+  allAlerts.forEach(a => { if (a && a.id) alertMap.set(a.id, a); });
+  extraSolved.forEach(a => { if (a && a.id && !alertMap.has(a.id)) alertMap.set(a.id, a); });
+  const alertsToExport = customList || Array.from(alertMap.values());
+
   if (!alertsToExport || !alertsToExport.length) {
     alert('No SOS alert records available to export.');
     return;
