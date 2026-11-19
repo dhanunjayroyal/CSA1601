@@ -192,6 +192,22 @@ tr:last-child td{border-bottom:none;}
 </style>
 </head>
 <body>
+<!-- Emergency SOS Full-Width Persistent Alert Bar -->
+<div id="activeSosTopBanner" style="display:none;position:sticky;top:0;left:0;right:0;z-index:99999;background:linear-gradient(135deg,#c0392b,#e74c3c);color:#fff;padding:12px 24px;box-shadow:0 4px 25px rgba(231,76,60,.6);animation:sosPulse 1.2s infinite alternate;">
+  <div style="max-width:1400px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <span style="font-size:26px;animation:spin 1.5s infinite linear;">🚨</span>
+      <div>
+        <div style="font-size:15px;font-weight:900;letter-spacing:.6px;">URGENT: CITIZEN SOS ACTIVE! <span id="topBannerUser" style="text-decoration:underline;">Citizen</span></div>
+        <div style="font-size:12px;opacity:.95;" id="topBannerLoc">📍 Detecting location...</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;">
+      <button onclick="showPage('sos'); stopAdminAlarm();" style="background:#fff;color:#c0392b;border:none;border-radius:8px;padding:7px 16px;font-weight:800;font-size:12px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.2);">📍 Respond & View Location</button>
+      <button onclick="stopAdminAlarm();" style="background:rgba(0,0,0,.35);color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:8px;padding:7px 14px;font-size:12px;cursor:pointer;">🔕 Mute Siren</button>
+    </div>
+  </div>
+</div>
 
 <!--── Sidebar ──-->
 <aside class="sidebar">
@@ -852,7 +868,7 @@ function getSirenAudio() {
   if (sirenAudioEl) return sirenAudioEl;
   try {
     const sampleRate = 22050;
-    const duration = 1.8;
+    const duration = 2.0;
     const numSamples = Math.floor(sampleRate * duration);
     const buffer = new ArrayBuffer(44 + numSamples * 2);
     const view = new DataView(buffer);
@@ -874,155 +890,148 @@ function getSirenAudio() {
     writeString(36, 'data');
     view.setUint32(40, numSamples * 2, true);
 
-    // Two-tone European police / ambulance siren (960Hz and 700Hz)
+    let phase = 0;
     for (let i = 0; i < numSamples; i++) {
       const t = i / sampleRate;
-      const freq = (Math.floor(t * 3.5) % 2 === 0) ? 960 : 700;
-      const sample = Math.sin(2 * Math.PI * freq * t) * 0.85;
-      const intSample = Math.max(-32768, Math.min(32767, Math.floor(sample * 32767)));
-      view.setInt16(44 + i * 2, intSample, true);
+      const freq = 820 + 320 * Math.sin(2 * Math.PI * 1.5 * t);
+      phase += 2 * Math.PI * freq / sampleRate;
+      const sample = Math.sin(phase) * 0.85;
+      view.setInt16(44 + i * 2, sample < 0 ? Math.max(-32768, sample * 32768) : Math.min(32767, sample * 32767), true);
     }
 
     const blob = new Blob([buffer], { type: 'audio/wav' });
     sirenAudioEl = new Audio(URL.createObjectURL(blob));
-    sirenAudioEl.volume = 1.0;
-  } catch(e) {
-    console.error('Siren Audio error:', e);
-  }
+    sirenAudioEl.loop = true;
+  } catch(e){}
   return sirenAudioEl;
 }
 
-// 2. Web Audio API Loud Pitch-Modulated Siren
-function playWebAudioSiren() {
-  try {
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContextClass) return;
-    if (!audioCtx) audioCtx = new AudioContextClass();
+// 2. High-Powered Web Audio API Emergency Horn Siren
+let adminOsc = null;
+let adminLfo = null;
+let adminLfoGain = null;
+let adminMasterGain = null;
+let adminSirenPlaying = false;
+let titleFlashTimer = null;
 
+function startWebAudioHorn() {
+  try {
+    const ACls = window.AudioContext || window.webkitAudioContext;
+    if (!ACls) return;
+    if (!audioCtx) audioCtx = new ACls();
     if (audioCtx.state === 'suspended') {
-      audioCtx.resume();
+      audioCtx.resume().catch(()=>{});
     }
 
-    const now = audioCtx.currentTime;
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
+    stopWebAudioHorn();
 
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(680, now);
-    osc.frequency.linearRampToValueAtTime(980, now + 0.3);
-    osc.frequency.linearRampToValueAtTime(680, now + 0.6);
-    osc.frequency.linearRampToValueAtTime(980, now + 0.9);
-    osc.frequency.linearRampToValueAtTime(680, now + 1.2);
-    osc.frequency.linearRampToValueAtTime(980, now + 1.5);
-    osc.frequency.linearRampToValueAtTime(680, now + 1.8);
+    adminOsc = audioCtx.createOscillator();
+    adminLfo = audioCtx.createOscillator();
+    adminLfoGain = audioCtx.createGain();
+    adminMasterGain = audioCtx.createGain();
 
-    gain.gain.setValueAtTime(0.01, now);
-    gain.gain.exponentialRampToValueAtTime(0.65, now + 0.05);
-    gain.gain.setValueAtTime(0.65, now + 1.7);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 1.9);
+    adminOsc.type = 'sawtooth';
+    adminOsc.frequency.setValueAtTime(880, audioCtx.currentTime);
 
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
+    // 1.4 Hz alternating horn sweep (high/low European & Indian emergency horn)
+    adminLfo.type = 'triangle';
+    adminLfo.frequency.setValueAtTime(1.4, audioCtx.currentTime);
 
-    osc.start(now);
-    osc.stop(now + 1.95);
-  } catch(e) {
-    console.error('WebAudio error:', e);
-  }
+    adminLfoGain.gain.setValueAtTime(280, audioCtx.currentTime); // 600Hz to 1160Hz sweep
+    adminLfo.connect(adminLfoGain);
+    adminLfoGain.connect(adminOsc.frequency);
+
+    adminMasterGain.gain.setValueAtTime(0.8, audioCtx.currentTime);
+    adminOsc.connect(adminMasterGain);
+    adminMasterGain.connect(audioCtx.destination);
+
+    adminLfo.start();
+    adminOsc.start();
+    adminSirenPlaying = true;
+  } catch(e){}
 }
 
-// 3. Master Play Alarm Function
-let adminAlarmTimer = null;
-let adminAlarmCount = 0;
+function stopWebAudioHorn() {
+  try {
+    if (adminOsc) { adminOsc.stop(); adminOsc.disconnect(); adminOsc = null; }
+    if (adminLfo) { adminLfo.stop(); adminLfo.disconnect(); adminLfo = null; }
+    adminSirenPlaying = false;
+  } catch(e){}
+}
+
+// 3. Master Emergency Alarm Controller
 function playSOSAlarm() {
-  adminAlarmCount = 0;
-  clearInterval(adminAlarmTimer);
+  soundUnlocked = true;
+  updateSoundUI();
 
-  function fireAlarm() {
-    // Always try to resume AudioContext first (may be suspended if no prior gesture)
-    try {
-      if (!audioCtx) {
-        const ACls = window.AudioContext || window.webkitAudioContext;
-        if (ACls) audioCtx = new ACls();
+  // Engine A: HTML5 Looping Audio
+  try {
+    const audio = getSirenAudio();
+    if (audio) {
+      audio.currentTime = 0;
+      audio.muted = false;
+      audio.volume = 1.0;
+      const p = audio.play();
+      if (p && typeof p.then === 'function') {
+        p.catch(() => { showSoundUnlockBanner(); });
       }
-      if (audioCtx && audioCtx.state === 'suspended') {
-        audioCtx.resume().then(() => { try { playWebAudioSiren(); } catch(e){} }).catch(()=>{});
-      } else {
-        try { playWebAudioSiren(); } catch(e){}
-      }
-    } catch(e){}
+    }
+  } catch(e){}
 
-    // Method A: HTML5 Audio
-    try {
-      const audio = getSirenAudio();
-      if (audio) {
-        audio.currentTime = 0;
-        const p = audio.play();
-        if (p && typeof p.then === 'function') {
-          p.then(() => {
-            soundUnlocked = true;
-            updateSoundUI();
-          }).catch(() => {
-            showSoundUnlockBanner();
-          });
-        }
-      }
-    } catch(e){}
-  }
+  // Engine B: WebAudio Dual-Tone Horn
+  startWebAudioHorn();
 
-  fireAlarm();
-  // Repeat alarm 4 times (every 2.5s) so admin can't miss it
-  adminAlarmTimer = setInterval(() => {
-    adminAlarmCount++;
-    if (adminAlarmCount >= 4) { clearInterval(adminAlarmTimer); return; }
-    fireAlarm();
-  }, 2500);
+  // Flashing Browser Tab Title (alerts admin even on other tabs!)
+  clearInterval(titleFlashTimer);
+  let flashToggle = false;
+  titleFlashTimer = setInterval(() => {
+    document.title = (flashToggle = !flashToggle) ? '🚨 EMERGENCY SOS ACTIVE!' : '⚠️ CITIZEN IN DANGER!';
+  }, 600);
+}
+
+function stopAdminAlarm() {
+  stopWebAudioHorn();
+  clearInterval(titleFlashTimer);
+  document.title = 'CrimeWatch – Admin Dashboard';
+  try {
+    if (sirenAudioEl) {
+      sirenAudioEl.pause();
+      sirenAudioEl.currentTime = 0;
+    }
+  } catch(e){}
+  const b = document.getElementById('activeSosTopBanner');
+  if (b) b.style.display = 'none';
+  updateSoundUI();
 }
 
 function unlockAudio() {
   soundUnlocked = true;
   try {
-    if (!audioCtx) {
-      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-      if (AudioContextClass) audioCtx = new AudioContextClass();
-    }
-    if (audioCtx && audioCtx.state === 'suspended') {
-      audioCtx.resume();
-    }
-    const audio = getSirenAudio();
-    if (audio) {
-      audio.muted = true;
-      audio.play().then(() => {
-        audio.pause();
-        audio.currentTime = 0;
-        audio.muted = false;
-        updateSoundUI();
-      }).catch(()=>{});
+    const ACls = window.AudioContext || window.webkitAudioContext;
+    if (ACls && !audioCtx) audioCtx = new ACls();
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(()=>{});
+    const a = getSirenAudio();
+    if (a) {
+      a.muted = true;
+      a.play().then(() => {
+        a.pause();
+        a.currentTime = 0;
+        a.muted = false;
+      }).catch(()=>{ a.muted = false; });
     }
   } catch(e){}
   updateSoundUI();
   hideSoundUnlockBanner();
 }
 
-function testOrUnlockSound() {
+function toggleAdminSound() {
+  if (adminSirenPlaying) {
+    stopAdminAlarm();
+    return;
+  }
   unlockAudio();
   playSOSAlarm();
-  const el = document.getElementById('soundStatus');
-  if (el) el.textContent = '🔊 Testing Siren...';
-  setTimeout(updateSoundUI, 2200);
-}
-
-function updateSoundUI() {
-  const el = document.getElementById('soundStatus');
-  const ic = document.getElementById('soundIcon');
-  if (!el) return;
-  if (soundUnlocked) {
-    el.textContent = 'Sound: Active (Tap to Test)';
-    if (ic) ic.textContent = '🔊';
-  } else {
-    el.textContent = 'Sound: Tap to Enable';
-    if (ic) ic.textContent = '🔇';
-  }
+  setTimeout(() => { stopAdminAlarm(); }, 2000);
 }
 
 function showSoundUnlockBanner() {
@@ -1552,33 +1561,50 @@ document.addEventListener('visibilitychange', () => {
 // Realtime cross-device cloud listener for instant SOS and Users
 let lastHandledSOSId = null;
 CrimeDB.onSOS((alert, isNew) => {
-  if (isNew && alert && alert.id && alert.id !== lastHandledSOSId) {
-    lastHandledSOSId = alert.id;
-    try { playSOSAlarm(); } catch(e) {}
-    showSOSAlarm();
-    const pill = document.getElementById('sosPill');
-    if (pill) {
-      pill.classList.add('ringing');
-      setTimeout(() => pill.classList.remove('ringing'), 5000);
-    }
-    try {
-      if ('Notification' in window) {
-        if (Notification.permission === 'granted') {
-          new Notification('🚨 CRIMEWATCH: NEW SOS ALERT!', {
-            body: (alert?.userName || 'Citizen') + ' has triggered an emergency SOS! City: ' + (alert?.city || 'Unknown'),
-            requireInteraction: true
-          });
-        } else if (Notification.permission !== 'denied') {
-          Notification.requestPermission();
-        }
-      }
-    } catch(e){}
-  }
   const sos = CrimeDB.getSOSAlerts();
-  const active = sos.filter(s => s.status === 'active').length;
-  lastSOSCount = active;
-  updateSOSBadge(active);
+  const activeAlerts = sos.filter(s => s.status === 'active');
+  const activeCount = activeAlerts.length;
+  lastSOSCount = activeCount;
+  updateSOSBadge(activeCount);
   renderSOS();
+
+  const topBanner = document.getElementById('activeSosTopBanner');
+  if (activeCount > 0) {
+    const latest = activeAlerts[0];
+    if (topBanner) {
+      topBanner.style.display = 'block';
+      const uEl = document.getElementById('topBannerUser');
+      const lEl = document.getElementById('topBannerLoc');
+      if (uEl) uEl.textContent = latest.userName || 'Citizen';
+      if (lEl) lEl.textContent = '📍 ' + (latest.address ? latest.address.slice(0, 80) : (latest.city || 'Coordinates: ' + latest.lat?.toFixed(4) + ', ' + latest.lng?.toFixed(4)));
+    }
+
+    // Play horn alarm if new alert OR if alarm not yet sounding
+    if (isNew || !adminSirenPlaying) {
+      playSOSAlarm();
+      showSOSAlarm();
+      document.getElementById('sosPill')?.classList.add('ringing');
+      setTimeout(() => document.getElementById('sosPill')?.classList.remove('ringing'), 6000);
+
+      // Native Desktop Notification
+      try {
+        if ('Notification' in window) {
+          if (Notification.permission === 'granted') {
+            new Notification('🚨 CRIMEWATCH: NEW CITIZEN SOS!', {
+              body: (latest.userName || 'Citizen') + ' activated emergency SOS! Location: ' + (latest.address || latest.city || 'Unknown'),
+              requireInteraction: true
+            });
+          } else if (Notification.permission !== 'denied') {
+            Notification.requestPermission();
+          }
+        }
+      } catch(e){}
+    }
+  } else {
+    // All SOS resolved
+    if (topBanner) topBanner.style.display = 'none';
+    stopAdminAlarm();
+  }
 });
 
 CrimeDB.onUser(u => {

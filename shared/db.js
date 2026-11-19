@@ -156,83 +156,120 @@ const CrimeDB = (() => {
     try { localStorage.setItem(USERS_KEY, JSON.stringify(list)); } catch(e){}
   }
 
-  // ── Polling Engine ──
+  // ── Polling Engine (Direct GitHub Gist API with ZERO Fastly CDN caching) ──
   let knownSOSIds = new Set();
   let knownUserEmails = new Set();
   let cloudInitDone = false;
-  let pollSinceTs = Date.now() - 5 * 60 * 1000; // last 5 min on init
+  let isCloudPollRunning = false;
+  let lastGistETag = null;
 
   function initCloudSync() {
     if (cloudInitDone) return;
     cloudInitDone = true;
 
-    // Record existing IDs so we can detect NEW ones
-    JSON.parse(localStorage.getItem(SOS_KEY) || '[]').forEach(s => knownSOSIds.add(s.id));
-    JSON.parse(localStorage.getItem(USERS_KEY) || '[]').forEach(u => { if (u.email) knownUserEmails.add(u.email); });
+    // Record existing IDs
+    try {
+      JSON.parse(localStorage.getItem(SOS_KEY) || '[]').forEach(s => { if (s && s.id) knownSOSIds.add(s.id); });
+      JSON.parse(localStorage.getItem(USERS_KEY) || '[]').forEach(u => { if (u && u.email) knownUserEmails.add(u.email); });
+    } catch(e){}
 
-    let pollSOSRunning = false;
-  let lastNotifiedSOSId = null;
+    function pollCloud() {
+      if (isCloudPollRunning) return;
+      isCloudPollRunning = true;
 
-  function pollSOS() {
-      if (pollSOSRunning) return; // prevent overlapping concurrent requests
-      pollSOSRunning = true;
-      // Add cache-busting ts param so GitHub CDN always returns fresh data
-      fetch(SOS_RAW_URL + '?nocache=' + Date.now(), { cache: 'no-store' })
-        .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
-        .then(data => {
-          const cloudAlerts = data && data.alerts;
-          if (!Array.isArray(cloudAlerts)) return;
-          cachedCloudSOS = cloudAlerts;
-          if (!cloudAlerts.length) return;
-          let latestNew = null;
-          cloudAlerts.forEach(ca => {
-            if (!ca || !ca.id) return;
-            const existed = knownSOSIds.has(ca.id);
-            mergeSOS(ca);
-            if (!existed && ca.status === 'active') {
-              latestNew = ca;
-            }
-            knownSOSIds.add(ca.id);
-          });
-          if (latestNew && latestNew.id !== lastNotifiedSOSId) {
-            lastNotifiedSOSId = latestNew.id;
-            notifySOS(latestNew, true);
-          } else if (!latestNew) {
-            notifySOS(null, false);
+      const headers = {
+        'Authorization': 'Bearer ' + GH_TOKEN,
+        'Accept': 'application/vnd.github+json'
+      };
+      if (lastGistETag) {
+        headers['If-None-Match'] = lastGistETag;
+      }
+
+      // DIRECT GIST REST API: bypasses Fastly 300s edge CDN cache completely!
+      fetch(GIST_API + '?t=' + Date.now(), { headers, cache: 'no-store' })
+        .then(res => {
+          if (res.status === 304) {
+            // Unchanged: zero bandwidth used
+            isCloudPollRunning = false;
+            return null;
           }
-          pollSOSRunning = false;
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const et = res.headers.get('ETag');
+          if (et) lastGistETag = et;
+          return res.json();
         })
-        .catch(()=>{ pollSOSRunning = false; });
-    }
-
-    function pollUsers() {
-      fetch(USR_RAW_URL + '?nocache=' + Date.now(), { cache: 'no-store' })
-        .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
         .then(data => {
-          const cloudUsers = data && data.users;
-          if (!Array.isArray(cloudUsers)) return;
-          cachedCloudUsers = cloudUsers;
-          let hasNew = false;
-          cloudUsers.forEach(cu => {
-            if (!cu || !cu.email) return;
-            if (!knownUserEmails.has(cu.email)) {
-              mergeUser(cu);
-              knownUserEmails.add(cu.email);
-              hasNew = true;
-            }
-          });
-          if (hasNew) notifyUser(null);
+          if (!data || !data.files) {
+            isCloudPollRunning = false;
+            return;
+          }
+
+          // A) Process Real-Time SOS Alerts
+          if (data.files['sos_data.json'] && data.files['sos_data.json'].content) {
+            try {
+              const parsed = JSON.parse(data.files['sos_data.json'].content);
+              const cloudAlerts = parsed.alerts || [];
+              cachedCloudSOS = cloudAlerts;
+              let latestNewAlert = null;
+
+              cloudAlerts.forEach(ca => {
+                if (!ca || !ca.id) return;
+                const existed = knownSOSIds.has(ca.id);
+                mergeSOS(ca);
+                if (!existed && ca.status === 'active') {
+                  latestNewAlert = ca;
+                }
+                knownSOSIds.add(ca.id);
+              });
+
+              if (latestNewAlert) {
+                notifySOS(latestNewAlert, true);
+              } else {
+                notifySOS(null, false);
+              }
+            } catch(e){}
+          }
+
+          // B) Process Real-Time Users
+          if (data.files['users_data.json'] && data.files['users_data.json'].content) {
+            try {
+              const parsed = JSON.parse(data.files['users_data.json'].content);
+              const cloudUsers = parsed.users || [];
+              cachedCloudUsers = cloudUsers;
+              let hasNewUser = false;
+
+              cloudUsers.forEach(cu => {
+                if (!cu || !cu.email) return;
+                if (!knownUserEmails.has(cu.email)) {
+                  mergeUser(cu);
+                  knownUserEmails.add(cu.email);
+                  hasNewUser = true;
+                }
+              });
+
+              if (hasNewUser) notifyUser(null);
+            } catch(e){}
+          }
+
+          isCloudPollRunning = false;
         })
-        .catch(()=>{});
+        .catch(() => {
+          isCloudPollRunning = false;
+        });
     }
 
-    // Run immediately on init
-    pollSOS();
-    pollUsers();
-    // SOS polls every 1.2 seconds for near-instant admin alert delivery
-    setInterval(pollSOS, 1200);
-    // Users poll every 5 seconds (less urgent)
-    setInterval(pollUsers, 5000);
+    // Run immediately
+    pollCloud();
+    // Poll every 1800ms for fast emergency dispatch
+    setInterval(pollCloud, 1800);
+
+    // Re-poll immediately on window focus
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', () => { setTimeout(pollCloud, 50); });
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') setTimeout(pollCloud, 50);
+      });
+    }
   }
 
   function seedAdmin(){

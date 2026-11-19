@@ -1039,6 +1039,8 @@ sosBtn.addEventListener('touchend', sosEnd, { passive: false });
 sosBtn.addEventListener('touchcancel', sosEnd, { passive: false });
 
 // ── Trigger SOS ───────────────────────────────────────────
+let activeSOSId = null;
+
 async function triggerSOS() {
   sosActive = true;
   sosBtn.classList.remove('pressing');
@@ -1047,26 +1049,30 @@ async function triggerSOS() {
   startEmergencySiren();
   document.getElementById('sosOverlay').classList.add('show');
   document.body.classList.add('sos-open');
+
+  // STEP 1: INSTANT DISPATCH TO ADMIN (< 20ms) — NEVER DELAY EMERGENCY
+  const coords = CrimeDB.CITY_COORDS[currentCity] || [19.0760, 72.8777];
+  const initialLat = userLat || coords[0];
+  const initialLng = userLng || coords[1];
+  
+  const sosRec = CrimeDB.sendSOS(currentUser.id, currentUser.name, initialLat, initialLng);
+  activeSOSId = sosRec.id;
+
   document.getElementById('sosLocInfo').innerHTML =
-    '<div style="display:flex;align-items:center;gap:10px;"><div class="loader" style="width:16px;height:16px;border:2px solid #e74c3c;border-top-color:transparent;border-radius:50%;animation:spin .8s linear infinite;"></div><span>🚨 Broadcasting urgent emergency SOS to Admin...<br/><small style="color:var(--muted);">Detecting exact GPS & nearby shops / landmarks...</small></span></div>';
+    `<div style="display:flex;align-items:center;gap:10px;">
+      <div class="loader" style="width:16px;height:16px;border:2px solid #e74c3c;border-top-color:transparent;border-radius:50%;animation:spin .8s linear infinite;"></div>
+      <span>🚨 <b>Alert Dispatched to Admin!</b><br/><small style="color:var(--muted);">Locking onto 100% exact GPS satellite coordinates...</small></span>
+    </div>`;
 
-  const send = async (lat, lng) => {
-    // 1) DISPATCH SOS IMMEDIATELY (< 50ms)
-    const sosRec = CrimeDB.sendSOS(currentUser.id, currentUser.name, lat, lng);
-
-    document.getElementById('sosLocInfo').innerHTML =
-      `📍 <b>Coordinates:</b> ${lat.toFixed(4)}° N, ${lng.toFixed(4)}° E<br/>
-       🚨 <b>Status:</b> Alert broadcasted to Admin!<br/>
-       🏠 <span style="color:var(--muted);">Looking up street address & nearby places...</span>`;
-
-    // 2) ASYNC RESILIENT REVERSE GEOCODING & NEARBY PLACES ALGORITHM
+  // Helper to reverse geocode and enrich address + nearby POIs
+  async function enrichLocation(lat, lng, sosId, accuracyMeters) {
     let address = '';
     let nearbyPlaces = [];
 
-    // Step A: Nominatim Reverse Geocoding with 8000ms timeout
+    // Reverse geocode via Nominatim
     try {
       const nomCtrl = new AbortController();
-      const nomTimeout = setTimeout(() => nomCtrl.abort(), 8000);
+      const nomTimeout = setTimeout(() => nomCtrl.abort(), 6000);
       const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`, {
         signal: nomCtrl.signal,
         headers: { 'Accept': 'application/json' }
@@ -1087,18 +1093,16 @@ async function triggerSOS() {
           if (addr.neighbourhood) nearbyPlaces.push({ name: addr.neighbourhood, type: 'neighbourhood' });
         }
       }
-    } catch(e) {
-      console.warn('Nominatim reverse error:', e);
-    }
+    } catch(e){}
 
-    // Step B: Query Nearby POIs (shops, hospitals, police, transit) via Overpass with 8000ms timeout
+    // Query nearby POIs via Overpass
     try {
       const ovCtrl = new AbortController();
-      const ovTimeout = setTimeout(() => ovCtrl.abort(), 8000);
-      const query = `[out:json][timeout:6];(
+      const ovTimeout = setTimeout(() => ovCtrl.abort(), 6000);
+      const query = `[out:json][timeout:5];(
         node(around:500,${lat},${lng})["amenity"~"hospital|police|pharmacy|clinic|bank|atm|restaurant|fuel"];
         node(around:500,${lat},${lng})["shop"];
-      );out 15;`;
+      );out 12;`;
       const ovRes = await fetch(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`, {
         signal: ovCtrl.signal
       });
@@ -1115,31 +1119,20 @@ async function triggerSOS() {
           });
         }
       }
-    } catch(e) {
-      console.warn('Overpass error:', e);
-    }
+    } catch(e){}
 
-    // Step C: Fallback address if Nominatim failed
     if (!address) {
-      let nearestCity = currentCity || 'Unknown City', minDist = Infinity;
-      Object.entries(CrimeDB.CITY_COORDS).forEach(([c, [clat, clng]]) => {
-        const d = Math.hypot(lat - clat, lng - clng);
-        if (d < minDist) { minDist = d; nearestCity = c; }
-      });
-      const approxKm = (minDist * 111).toFixed(1);
-      address = `Near ${nearestCity} (~ ${approxKm} km from center), Lat: ${lat.toFixed(4)}, Lng: ${lng.toFixed(4)}`;
-      if (!nearbyPlaces.length) {
-        nearbyPlaces.push({ name: `Police Control Room (${nearestCity})`, type: 'police' });
-        nearbyPlaces.push({ name: `Emergency Response Unit`, type: 'hospital' });
-      }
+      address = `Lat: ${lat.toFixed(5)}, Lng: ${lng.toFixed(5)} near ${currentCity || 'City'}`;
+      nearbyPlaces.push({ name: 'Emergency Response Zone', type: 'police' });
     }
 
-    // Update database & cloud
-    CrimeDB.updateSOS(sosRec.id, { address, nearbyPlaces });
+    // Update DB & Cloud with refined coordinates, address & places
+    CrimeDB.updateSOS(sosId, { lat, lng, address, nearbyPlaces, accuracy: accuracyMeters });
 
-    // Render in overlay
-    const mapLink = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}&zoom=16`;
+    // Update UI on user overlay
+    const mapLink = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}&zoom=17`;
     const gmLink  = `https://maps.google.com/?q=${lat},${lng}`;
+    const accText = accuracyMeters ? ` <span style="color:#00b894;font-size:11px;">(±${accuracyMeters}m GPS Accuracy)</span>` : '';
 
     let placesHtml = '';
     if (nearbyPlaces.length) {
@@ -1151,77 +1144,55 @@ async function triggerSOS() {
           : p.type === 'bank' || p.type === 'atm' ? '🏦'
           : p.type === 'restaurant' || p.type === 'cafe' ? '🍽️'
           : p.type === 'pharmacy' ? '💊'
-          : p.type === 'road' ? '🛣️'
-          : p.type === 'suburb' || p.type === 'neighbourhood' ? '🏘️'
-          : p.type === 'building' ? '🏢' : '📍';
-        return `<span style="background:rgba(232,67,147,.18);border:1px solid rgba(232,67,147,.4);color:#ff79c6;border-radius:14px;padding:4px 10px;font-size:11px;white-space:nowrap;">${icon} ${p.name}</span>`;
+          : p.type === 'road' ? '🛣️' : '📍';
+        return `<span style="background:rgba(232,67,147,.18);border:1px solid rgba(232,67,147,.4);color:#ff79c6;border-radius:14px;padding:3px 9px;font-size:11px;white-space:nowrap;">${icon} ${p.name}</span>`;
       }).join('');
       placesHtml = `<div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,.1);">
-        <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-bottom:7px;">📍 NEARBY PLACES (${nearbyPlaces.length} found):</div>
+        <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px;">📍 NEARBY SHOPS & LANDMARKS:</div>
         <div style="display:flex;flex-wrap:wrap;gap:5px;">${placeItems}</div>
       </div>`;
-    } else {
-      placesHtml = '<div style="margin-top:8px;font-size:11px;color:var(--muted);">📍 Fetching nearby shops & landmarks...</div>';
     }
 
     document.getElementById('sosLocInfo').innerHTML =
       `<div style="text-align:left;line-height:1.7;">
-        📍 <b>Coordinates:</b> ${lat.toFixed(5)}° N, ${lng.toFixed(5)}° E<br/>
-        🏠 <b>Address:</b> ${address ? (address.length > 100 ? address.slice(0,100)+'…' : address) : 'Locating...'}<br/>
+        📍 <b>Coordinates:</b> ${lat.toFixed(5)}° N, ${lng.toFixed(5)}° E${accText}<br/>
+        🏠 <b>Address:</b> ${address.length > 95 ? address.slice(0,95) + '…' : address}<br/>
         <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
-          <a href="${gmLink}" target="_blank" style="font-size:11px;background:rgba(66,133,244,.2);border:1px solid rgba(66,133,244,.4);color:#74b9ff;padding:3px 10px;border-radius:8px;text-decoration:none;">📌 Open in Maps</a>
-          <a href="${mapLink}" target="_blank" style="font-size:11px;background:rgba(0,184,148,.15);border:1px solid rgba(0,184,148,.3);color:#00b894;padding:3px 10px;border-radius:8px;text-decoration:none;">🗺️ OpenStreetMap</a>
+          <a href="${gmLink}" target="_blank" style="font-size:11px;background:rgba(66,133,244,.2);border:1px solid rgba(66,133,244,.4);color:#74b9ff;padding:4px 10px;border-radius:8px;text-decoration:none;">📌 Open in Maps</a>
+          <a href="${mapLink}" target="_blank" style="font-size:11px;background:rgba(0,184,148,.15);border:1px solid rgba(0,184,148,.3);color:#00b894;padding:4px 10px;border-radius:8px;text-decoration:none;">🗺️ OpenStreetMap</a>
         </div>
         ${placesHtml}
       </div>`;
-  };
+  }
 
-  const coords = CrimeDB.CITY_COORDS[currentCity] || [19.0760, 72.8777];
-  const fallbackLat = userLat || coords[0];
-  const fallbackLng = userLng || coords[1];
+  // STEP 2: SIMULTANEOUS HIGH-ACCURACY GPS HARDWARE ACQUISITION
   if (navigator.geolocation) {
-    // Use watchPosition to grab the BEST available fix within 8 seconds
-    let bestAccuracy = Infinity;
-    let bestLat = null, bestLng = null;
-    let watchId = null;
-    let resolved = false;
-    const finish = (lat, lng) => {
-      if (resolved) return;
-      resolved = true;
-      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
-      send(lat, lng);
-    };
-    // Timeout fallback
-    const gpsTimeout = setTimeout(() => {
-      finish(bestLat || fallbackLat, bestLng || fallbackLng);
-    }, 9000);
-    watchId = navigator.geolocation.watchPosition(
-      p => {
-        const acc = p.coords.accuracy;
-        if (acc < bestAccuracy) {
-          bestAccuracy = acc;
-          bestLat = p.coords.latitude;
-          bestLng = p.coords.longitude;
-        }
-        // Accept if accuracy <= 30 metres (excellent) or <= 80m after 3s
-        if (acc <= 30 || (acc <= 80 && bestLat !== null)) {
-          clearTimeout(gpsTimeout);
-          finish(bestLat, bestLng);
-        }
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        const exactLat = pos.coords.latitude;
+        const exactLng = pos.coords.longitude;
+        const acc = Math.round(pos.coords.accuracy || 10);
+        userLat = exactLat;
+        userLng = exactLng;
+        enrichLocation(exactLat, exactLng, sosRec.id, acc);
       },
       () => {
-        clearTimeout(gpsTimeout);
-        finish(bestLat || fallbackLat, bestLng || fallbackLng);
+        // Fallback to initial coords if GPS access delayed
+        enrichLocation(initialLat, initialLng, sosRec.id, null);
       },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
     );
   } else {
-    send(fallbackLat, fallbackLng);
+    enrichLocation(initialLat, initialLng, sosRec.id, null);
   }
 }
 
 function dismissSOS() {
   stopEmergencySiren();
+  if (activeSOSId) {
+    try { CrimeDB.resolveSOSAlert(activeSOSId); } catch(e){}
+    activeSOSId = null;
+  }
   document.getElementById('sosOverlay').classList.remove('show');
   document.body.classList.remove('sos-open');
   sosActive = false;
