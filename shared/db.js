@@ -293,32 +293,41 @@ const CrimeDB = (() => {
   }
 
   function getCrimeData(){
-    const s = JSON.parse(localStorage.getItem(CRIME_KEY) || '[]');
-    if (s.length) return s;
+    // 1. Direct from in-memory global dataset (instant, 100% reliable, zero localStorage quota pressure)
     if (typeof window !== 'undefined' && window.__CRIME_DATA__ && window.__CRIME_DATA__.length) {
-      try { localStorage.setItem(CRIME_KEY, JSON.stringify(window.__CRIME_DATA__)); } catch(e){}
+      try {
+        const custom = JSON.parse(localStorage.getItem('cw_custom_crimes') || '[]');
+        if (custom.length) return [...custom, ...window.__CRIME_DATA__];
+      } catch(e){}
       return window.__CRIME_DATA__;
     }
+    // 2. Fallback to localStorage
+    try {
+      const s = JSON.parse(localStorage.getItem(CRIME_KEY) || '[]');
+      if (s && s.length) return s;
+    } catch(e){}
     return [];
   }
 
   function addCrime(c){
-    const d = getCrimeData();
     c.id = 'CRM_' + Date.now();
     const cc = CITY_COORDS[c.city] || [20, 78];
     c.lat = +(cc[0] + (Math.random() - 0.5) * 0.06).toFixed(4);
     c.lng = +(cc[1] + (Math.random() - 0.5) * 0.06).toFixed(4);
     c.uploadedAt = new Date().toISOString();
-    d.push(c);
-    try { localStorage.setItem(CRIME_KEY, JSON.stringify(d)); } catch(e){}
+    try {
+      const custom = JSON.parse(localStorage.getItem('cw_custom_crimes') || '[]');
+      custom.unshift(c);
+      localStorage.setItem('cw_custom_crimes', JSON.stringify(custom));
+    } catch(e){}
     return c;
   }
 
   function addCrimesBulk(records){
     if (!Array.isArray(records) || !records.length) return 0;
-    const d = getCrimeData();
     const now = new Date().toISOString();
     let count = 0;
+    const newItems = [];
     records.forEach((c, idx) => {
       if (!c.crimeType || !c.city) return;
       c.id = 'CRM_' + Date.now() + '_' + idx + '_' + Math.floor(Math.random()*1000);
@@ -330,16 +339,21 @@ const CrimeDB = (() => {
       if (!c.domain) c.domain = 'Other Crime';
       if (!c.weapon) c.weapon = 'None';
       if (!c.caseClosed) c.caseClosed = 'No';
-      d.push(c);
+      newItems.push(c);
       count++;
     });
-    try { localStorage.setItem(CRIME_KEY, JSON.stringify(d)); } catch(e){}
+    try {
+      const custom = JSON.parse(localStorage.getItem('cw_custom_crimes') || '[]');
+      localStorage.setItem('cw_custom_crimes', JSON.stringify([...newItems, ...custom]));
+    } catch(e){}
     return count;
   }
 
   function deleteCrime(id){
-    const d = getCrimeData().filter(c => c.id !== id);
-    localStorage.setItem(CRIME_KEY, JSON.stringify(d));
+    try {
+      const custom = JSON.parse(localStorage.getItem('cw_custom_crimes') || '[]').filter(c => c.id !== id);
+      localStorage.setItem('cw_custom_crimes', JSON.stringify(custom));
+    } catch(e){}
   }
 
   function loginAdmin(email, pw){
@@ -618,3 +632,10 @@ const CrimeDB = (() => {
     onSOS, onUser, initCloudSync
   };
 })();
+
+if (typeof window !== 'undefined') {
+  window.CrimeDB = CrimeDB;
+}
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = CrimeDB;
+}

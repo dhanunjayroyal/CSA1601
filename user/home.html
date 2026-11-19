@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache"/>
 <meta http-equiv="Expires" content="0"/>
 <title>CrimeWatch India – Safety Dashboard</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css"/>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
@@ -83,7 +83,7 @@ body{
   overflow:hidden;margin-bottom:14px;background:#151520;
 }
 .leaflet-tile{
-  filter:brightness(0.65) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.75);
+  opacity: 0.96;
 }
 .chart-card{
   background:var(--card);border:1px solid var(--border);border-radius:14px;
@@ -511,7 +511,7 @@ body.sos-open{overflow:hidden !important;}
   </div>
 </div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="../shared/crime-data-inline.js"></script>
 <script src="../shared/db.js"></script>
@@ -698,6 +698,10 @@ function loadCitySafety(city, preserveExactCoords) {
   }
 
   const allData = CrimeDB.getCrimeData();
+  if (!allData || !allData.length) {
+    setTimeout(() => loadCitySafety(city, preserveExactCoords), 200);
+    return;
+  }
   const cityData = allData.filter(d => d.city === city);
 
   // Safety Score & Risk Level
@@ -777,9 +781,14 @@ function loadCitySafety(city, preserveExactCoords) {
 function initUserMap(city, data) {
   const coords = CrimeDB.CITY_COORDS[city] || [19.0760, 72.8777];
   if (!userMapObj) {
-    userMapObj = L.map('userMap').setView(coords, 12);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors',
+    userMapObj = L.map('userMap', {
+      zoomControl: true,
+      preferCanvas: true
+    }).setView(coords, 12);
+
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: '© CartoDB, © OpenStreetMap',
+      subdomains: 'abcd',
       maxZoom: 19
     }).addTo(userMapObj);
   } else {
@@ -787,9 +796,11 @@ function initUserMap(city, data) {
     userMapObj.eachLayer(l => { if (!l._url) userMapObj.removeLayer(l); });
   }
 
+  userMapObj.invalidateSize();
+
   // 5km Radius Circle
   L.circle(coords, {
-    radius: 5000, color: '#e84393', fillColor: '#e84393', fillOpacity: 0.05, weight: 2, dashArray: '6,4'
+    radius: 5000, color: '#e84393', fillColor: '#e84393', fillOpacity: 0.08, weight: 2, dashArray: '6,4'
   }).addTo(userMapObj);
 
   // Crime Markers
@@ -798,8 +809,13 @@ function initUserMap(city, data) {
     if (!d.lat || !d.lng) return;
     const col = colors[d.domain] || '#3498db';
     L.circleMarker([d.lat, d.lng], {
-      radius: 7, fillColor: col, color: '#ffffff', weight: 1.5, fillOpacity: 0.9
-    }).bindPopup(`<div style="font-family:sans-serif;min-width:160px;line-height:1.5;">
+      radius: 8,
+      fillColor: col,
+      color: '#ffffff',
+      weight: 1.5,
+      opacity: 1,
+      fillOpacity: 0.92
+    }).bindPopup(`<div style="font-family:sans-serif;min-width:160px;line-height:1.5;color:#111;">
       <span style="background:${col};color:#fff;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:800;">${d.domain}</span>
       <div style="font-size:13px;font-weight:800;color:#111;margin-top:4px;">${d.crimeType}</div>
       <div>📅 ${d.dateOccurrence || '—'} | 🔫 ${d.weapon || 'None'}</div>
@@ -811,7 +827,7 @@ function initUserMap(city, data) {
   L.marker(coords, {
     icon: L.divIcon({
       className: '',
-      html: '<div style="background:#e84393;width:14px;height:14px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 10px rgba(232,67,147,.9);"></div>'
+      html: '<div style="background:#e84393;width:14px;height:14px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 12px rgba(232,67,147,.9);"></div>'
     })
   }).bindPopup('📍 Your Selected City: ' + city).addTo(userMapObj);
 
@@ -821,12 +837,18 @@ function initUserMap(city, data) {
 // ── Full Map ──────────────────────────────────────────────
 function initFullMap() {
   if (!fullMapObj) {
-    fullMapObj = L.map('fullMap').setView([20.5937, 78.9629], 5);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors',
+    fullMapObj = L.map('fullMap', {
+      zoomControl: true,
+      preferCanvas: true
+    }).setView([20.5937, 78.9629], 5);
+
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: '© CartoDB, © OpenStreetMap',
+      subdomains: 'abcd',
       maxZoom: 19
     }).addTo(fullMapObj);
   }
+  fullMapObj.invalidateSize();
   renderFullMap();
   setTimeout(() => { if (fullMapObj) fullMapObj.invalidateSize(); }, 200);
 }
@@ -837,17 +859,30 @@ function renderFullMap() {
   const cf = document.getElementById('fmCity')?.value || '';
   const tf = document.getElementById('fmType')?.value || '';
   const data = CrimeDB.getCrimeData().filter(d => (!cf || d.city === cf) && (!tf || d.crimeType === tf)).slice(0, 1500);
+
+  if (cf && CrimeDB.CITY_COORDS[cf]) {
+    fullMapObj.setView(CrimeDB.CITY_COORDS[cf], 12);
+  } else if (!cf) {
+    fullMapObj.setView([20.5937, 78.9629], 5);
+  }
+  fullMapObj.invalidateSize();
+
   const colors = { 'Violent Crime': '#e74c3c', 'Fire Accident': '#f39c12', 'Traffic Fatality': '#9b59b6', 'Other Crime': '#3498db' };
   data.forEach(d => {
     if (!d.lat || !d.lng) return;
     const col = colors[d.domain] || '#3498db';
     L.circleMarker([d.lat, d.lng], {
-      radius: 7, fillColor: col, color: '#ffffff', weight: 1.5, fillOpacity: 0.9
-    }).bindPopup(`<div style="font-family:sans-serif;min-width:160px;line-height:1.5;">
+      radius: 8,
+      fillColor: col,
+      color: '#ffffff',
+      weight: 1.5,
+      opacity: 1,
+      fillOpacity: 0.92
+    }).bindPopup(`<div style="font-family:sans-serif;min-width:160px;line-height:1.5;color:#111;">
       <span style="background:${col};color:#fff;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:800;">${d.domain}</span>
       <div style="font-size:13px;font-weight:800;color:#111;margin-top:4px;">${d.crimeType}</div>
       <div>📍 ${d.city} | 📅 ${d.dateOccurrence || '—'}</div>
-      <div style="color:${d.caseClosed==='Yes'?'#27ae60':'#f39c12'};font-weight:700;font-size:11px;margin-top:2px;">${d.caseClosed==='Yes'?'✅ Solved':'⏳ Open Case'}</div>
+      <div style="color:${d.caseClosed==='Yes'?'#27ae60':'#e67e22'};font-weight:700;font-size:11px;margin-top:2px;">${d.caseClosed==='Yes'?'✅ Solved':'⏳ Open Case'}</div>
     </div>`)
       .addTo(fullMapObj);
   });

@@ -6,7 +6,7 @@
 <meta http-equiv="Pragma" content="no-cache"/>
 <meta http-equiv="Expires" content="0"/>
 <title>CrimeWatch – Admin Dashboard</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css"/>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{--primary:#1a237e;--accent:#c62828;--gold:#f9a825;--green:#27ae60;
@@ -87,8 +87,8 @@ canvas{max-width:100%;}
 .rcount{font-size:11px;color:var(--muted);width:50px;text-align:right;}
 
 /*── Map ──*/
-#adminMap{height:420px;border-radius:0 0 12px 12px;}
-.leaflet-tile{filter:brightness(0.65) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.75);}
+#adminMap{height:460px;border-radius:0 0 12px 12px;background:#151520;}
+.leaflet-tile{opacity:0.96;}
 .map-header{background:var(--card);border:1px solid var(--border);border-radius:12px 12px 0 0;
   padding:14px 18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
 .map-header h3{font-size:14px;font-weight:600;flex:1;}
@@ -565,7 +565,7 @@ tr:last-child td{border-bottom:none;}
   </div>
 </div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 <script src="../shared/crime-data-inline.js"></script>
@@ -896,8 +896,17 @@ function sp(id) {
   document.getElementById('pageTitle').textContent = PAGE_TITLES[id] || id;
 
   if (id === 'map') {
-    if (!mapInited) { initAdminMap(); mapInited = true; }
-    else { setTimeout(() => { if (aMap) aMap.invalidateSize(); }, 100); }
+    if (!mapInited) {
+      initAdminMap();
+      mapInited = true;
+    } else {
+      setTimeout(() => {
+        if (aMap) {
+          aMap.invalidateSize();
+          renderMapMarkers();
+        }
+      }, 150);
+    }
   }
   if (id === 'analytics' && !analyticsInited) { initAnalytics(); analyticsInited = true; }
   if (id === 'users') renderUsers();
@@ -911,6 +920,11 @@ function sp(id) {
 // ════════════════════════════════════════════════════════
 function initDashboard() {
   const data  = CrimeDB.getCrimeData();
+  if (!data || !data.length) {
+    // If inline dataset is still being evaluated, retry in 200ms
+    setTimeout(initDashboard, 200);
+    return;
+  }
   const users = CrimeDB.getAllUsers();
   const sos   = CrimeDB.getSOSAlerts();
   const active = sos.filter(s => s.status === 'active').length;
@@ -1257,19 +1271,28 @@ function initAnalytics() {
 }
 
 // ── Interactive Map Marker Renderer (High-Contrast Color Scenes) ──
+let aMap = null;
+let aLayer = null;
+
 function initAdminMap() {
   setTimeout(() => {
     if (!aMap) {
-      aMap = L.map('adminMap').setView([20.5937, 78.9629], 5);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors',
+      aMap = L.map('adminMap', {
+        zoomControl: true,
+        preferCanvas: true
+      }).setView([20.5937, 78.9629], 5);
+
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '© CartoDB, © OpenStreetMap',
+        subdomains: 'abcd',
         maxZoom: 19
       }).addTo(aMap);
+
       aLayer = L.layerGroup().addTo(aMap);
     }
     aMap.invalidateSize();
     renderMapMarkers();
-  }, 200);
+  }, 150);
 }
 
 function renderMapMarkers() {
@@ -1285,19 +1308,34 @@ function renderMapMarkers() {
     'Other Crime': '#3498db'
   };
 
-  const data = CrimeDB.getCrimeData().filter(d => (!cf || d.city === cf) && (!tf || d.crimeType === tf)).slice(0, 1500);
+  const allData = CrimeDB.getCrimeData();
+  if (!allData || !allData.length) {
+    setTimeout(renderMapMarkers, 200);
+    return;
+  }
+
+  const data = allData.filter(d => (!cf || d.city === cf) && (!tf || d.crimeType === tf)).slice(0, 1500);
+
+  // Position map camera FIRST to avoid any SVG/Canvas clipping issues
+  if (cf && CrimeDB.CITY_COORDS[cf]) {
+    aMap.setView(CrimeDB.CITY_COORDS[cf], 12);
+  } else if (!cf) {
+    aMap.setView([20.5937, 78.9629], 5);
+  }
+  aMap.invalidateSize();
 
   data.forEach(d => {
     if (!d.lat || !d.lng) return;
     const color = domainColors[d.domain] || '#3498db';
     L.circleMarker([d.lat, d.lng], {
-      radius: 7,
+      radius: 8,
       fillColor: color,
       color: '#ffffff',
       weight: 1.5,
-      fillOpacity: 0.88
+      opacity: 1,
+      fillOpacity: 0.92
     }).bindPopup(
-      `<div style="font-family:sans-serif;min-width:180px;line-height:1.6;">
+      `<div style="font-family:sans-serif;min-width:180px;line-height:1.6;color:#111;">
         <span style="background:${color};color:#fff;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:800;">${d.domain}</span>
         <div style="font-size:14px;font-weight:800;color:#111;margin-top:4px;">${d.crimeType}</div>
         <div>📍 <b>${d.city}</b></div>
@@ -1313,10 +1351,6 @@ function renderMapMarkers() {
   const headerTitle = document.querySelector('.map-header h3');
   if (headerTitle) {
     headerTitle.textContent = `🗺️ Interactive Crime Map (${data.length.toLocaleString()} scenes)`;
-  }
-
-  if (cf && CrimeDB.CITY_COORDS[cf]) {
-    aMap.setView(CrimeDB.CITY_COORDS[cf], 12);
   }
 }
 
